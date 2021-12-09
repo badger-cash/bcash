@@ -1,17 +1,18 @@
 {
   "name": "bcash",
-  "version": "2.0.0-dev",
-  "description": "Bitcoin cash bike-shed",
+  "version": "2.1.3",
+  "description": "Bitcoin Cash full node and library",
   "license": "MIT",
-  "repository": "git://github.com/bcoin-org/bcash.git",
-  "homepage": "https://github.com/bcoin-org/bcash",
+  "repository": "git://github.com/badger-cash/bcash.git",
+  "homepage": "https://github.com/badger-cash/bcash",
   "bugs": {
-    "url": "https://github.com/rojii/bcash/issues"
+    "url": "https://github.com/badger-cash/bcash/issues"
   },
   "author": "Fedor Indutny <fedor@indutny.com>",
   "contributors": [
     "Christopher Jeffrey <chjjeffrey@gmail.com>",
-    "Jonathan Gonzalez <rojikkushisutemu@gmail.com>"
+    "Jonathan Gonzalez <rojikkushisutemu@gmail.com>",
+    "Vin Armani <vin@badger.cash>"
   ],
   "keywords": [
     "bcash",

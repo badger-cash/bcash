@@ -46,7 +46,8 @@ class CLI {
       host: this.config.str('http-host'),
       port: this.config.uint('http-port')
         || ports[this.network]
-        || ports.main
+        || ports.main,
+      limit: 100 << 20
     });
   }
 
@@ -62,15 +63,17 @@ class CLI {
   }
 
   async getTX() {
-    const hash = this.config.str(0, '');
+    const slp = this.config.str(0, '').toLowerCase() == 'slp';
+    const dataIndex = slp ? 1 : 0
+    const hash = this.config.str(dataIndex, '');
 
     if (hash.length !== 64) {
-      const txs = await this.client.getTXByAddress(hash);
+      const txs = await this.client.getTXByAddress(hash, slp);
       this.log(txs);
       return;
     }
 
-    const tx = await this.client.getTX(hash);
+    const tx = await this.client.getTX(hash, slp);
 
     if (!tx) {
       this.log('TX not found.');
@@ -78,6 +81,30 @@ class CLI {
     }
 
     this.log(tx);
+  }
+
+  async getSlp() {
+    const hash = this.config.str(0, '');
+    const records = await this.client.getSlpCoinRecords(hash);
+
+    if (!records) {
+      this.log('records not found.');
+      return;
+    }
+
+    this.log(records);
+  }
+
+  async getSlpToken() {
+    const hash = this.config.str(0, '');
+    const record = await this.client.getSlpTokenRecord(hash);
+
+    if (!record) {
+      this.log('record not found.');
+      return;
+    }
+
+    this.log(record);
   }
 
   async getBlock() {
@@ -147,16 +174,18 @@ class CLI {
   }
 
   async getCoin() {
-    const hash = this.config.str(0, '');
-    const index = this.config.uint(1);
+    const slp = this.config.str(0, '').toLowerCase() == 'slp';
+    const dataIndex = slp ? 1 : 0
+    const hash = this.config.str(dataIndex, '');
+    const index = this.config.uint(dataIndex + 1);
 
     if (hash.length !== 64) {
-      const coins = await this.client.getCoinsByAddress(hash);
+      const coins = await this.client.getCoinsByAddress(hash, slp);
       this.log(coins);
       return;
     }
 
-    const coin = await this.client.getCoin(hash, index);
+    const coin = await this.client.getCoin(hash, index, slp);
 
     if (!coin) {
       this.log('Coin not found.');
@@ -235,6 +264,12 @@ class CLI {
         break;
       case 'coin':
         await this.getCoin();
+        break;
+      case 'slp':
+        await this.getSlp();
+        break;
+      case 'token':
+        await this.getSlpToken();
         break;
       case 'block':
         await this.getBlock();
