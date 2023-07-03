@@ -244,9 +244,9 @@ mrmr@^0.1.8:
   resolved "git+https://github.com/chjj/n64.git#34f981f1441f569821d97a31f8cf21a3fc11b8f6"
 
 nan@^2.13.1, nan@^2.14.0:
-  version "2.15.0"
-  resolved "https://registry.yarnpkg.com/nan/-/nan-2.15.0.tgz#3f34a473ff18e15c1b5626b62903b5ad6e665fee"
-  integrity sha512-8ZtvEnA2c5aYCZYd1cvgdnU6cqwixRoYg70xPLWUws5ORTa/lnw+u4amixRS/Ac5U5mQVgp9pnlSUnbNWFaWZQ==
+  version "2.17.0"
+  resolved "https://registry.yarnpkg.com/nan/-/nan-2.17.0.tgz#c0150a2368a182f033e9aa5195ec76ea41a199cb"
+  integrity sha512-2ZTgtl0nJsO0KQCjEpxcIr5D+Yv90plTitZt9JBfQvVJDS5seMl3FOvsh3+9CoYWXf/1l5OaZzzF6nDm4cagaQ==
 
 "nan@git+https://github.com/braydonf/nan.git#semver:=2.14.0", "nan@git+https://github.com/braydonf/nan.git#semver:~2.14.0":
   version "2.14.0"

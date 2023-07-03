@@ -3,7 +3,7 @@
 [![CircleCi Status][circleci-status-img]][circleci-status-url]
 [![Coverage Status][coverage-status-img]][coverage-status-url]
 
-**Bcash** is an alternative implementation of the bitcoin cash protocol,
+**Bcash** (eCash Edition) is an alternative implementation of the eCash protocol,
 written in node.js.
 
 Bcash is undergoing development and testing and is in alpha stage. Bcash
