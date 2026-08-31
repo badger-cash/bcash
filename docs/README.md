@@ -12,6 +12,9 @@ Welcome to the bcoin docs!
 - [Running in the Browser][browser]
 - [REST and RPC API][rest-rpc]
 
+## Deployment
+- [Running a Public Node Behind nginx (Hardened)][public-node-nginx]
+
 ## Code Examples
 - [Simple Fullnode][example-simple-fullnode]
 - [Connect to Peer][example-connect-peer]
@@ -36,6 +39,8 @@ Welcome to the bcoin docs!
 [cli]: CLI.md
 [browser]: Running-in-the-browser.md
 [rest-rpc]: http://bcoin.io/api-docs/index.html#introduction
+
+[public-node-nginx]: Public-Node-Nginx-Hardening.md
 
 [example-p2p]: Examples/connect-to-the-p2p-network.js
 [example-blockchain]: Examples/create-a-blockchain-and-mempool.js
