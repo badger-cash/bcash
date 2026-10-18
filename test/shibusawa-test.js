@@ -17,11 +17,18 @@ let flags = [
   common.flags.MANDATORY_VERIFY_FLAGS
 ];
 
+// STANDARD_VERIFY_FLAGS includes VERIFY_63BITINT since Shibusawa, so a case
+// that is not activated must clear it as well as not adding it.
+function withActivation(flag, activated) {
+  if (activated)
+    return flag | common.flags.VERIFY_63BITINT;
+  return flag & ~common.flags.VERIFY_63BITINT;
+}
+
 function isSuccess(stack, script, expected, activated) {
   for (let flag of flags) {
     const input = stack.clone();
-    if (activated)
-      flag |= common.flags.VERIFY_63BITINT
+    flag = withActivation(flag, activated);
     script.execute(input, flag);
     assert.bufferEqual(input.items[0], expected);
   }
@@ -32,8 +39,7 @@ function isError(stack, script, errorMsg, activated) {
     const input = stack.clone();
     let err;
     try {
-      if (activated)
-        flag |= common.flags.VERIFY_63BITINT
+      flag = withActivation(flag, activated);
       script.execute(input, flag);
     } catch (e) {
       err = e;
