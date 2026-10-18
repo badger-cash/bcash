@@ -11,7 +11,12 @@
 
 const assert = require('bsert');
 const {randomBytes} = require('crypto');
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
 const Chain = require('../lib/blockchain/chain');
+const Pool = require('../lib/net/pool');
+const Peer = require('../lib/net/peer');
 const Block = require('../lib/primitives/block');
 const Network = require('../lib/protocol/network');
 const consensus = require('../lib/protocol/consensus');
@@ -230,6 +235,221 @@ describe('Chain anchor', function() {
       const locator = await chain.getLocator();
       assert.strictEqual(locator[locator.length - 1].equals(
         (await chain.getEntryByHeight(971000)).hash), true);
+    });
+  });
+
+  describe('given by hash', function() {
+    const COUNT = consensus.MEDIAN_TIMESPAN;
+    const TRUSTED = 971010;
+
+    // Chained headers; anchor headers are taken on trust, not on work.
+    const chainOf = (n) => {
+      const headers = [];
+      let prev = randomBytes(32);
+      for (let i = 0; i < n; i++) {
+        const header = Buffer.alloc(80);
+        header.writeUInt32LE(1, 0);
+        prev.copy(header, 4);
+        randomBytes(32).copy(header, 36);
+        header.writeUInt32LE(1700000000 + i * 600, 68);
+        header.writeUInt32LE(0x1d00ffff, 72);
+        headers.push(header);
+        prev = headerBlock(header).hash();
+      }
+      return headers;
+    };
+    const rhash = header => headerBlock(header).rhash();
+
+    const headers = chainOf(COUNT);
+    const trusted = {height: TRUSTED, hash: rhash(headers[COUNT - 1])};
+    let prefix;
+
+    const open = async (anchor) => {
+      const chain = new Chain({
+        network, spv: true, memory: false, prefix, anchor
+      });
+      await chain.open();
+      return chain;
+    };
+
+    beforeEach(() => {
+      prefix = fs.mkdtempSync(path.join(os.tmpdir(), 'bcash-anchor-'));
+    });
+
+    afterEach(() => {
+      fs.rmSync(prefix, {recursive: true, force: true});
+    });
+
+    it('checks the hash and that the height leaves room for ancestors', () => {
+      assert.throws(() => new Chain({
+        network, memory: true, spv: true,
+        anchor: {height: TRUSTED, hash: 'zz'}
+      }), /32 bytes of hex/);
+      assert.throws(() => new Chain({
+        network, memory: true, spv: true,
+        anchor: {height: COUNT - 2, hash: trusted.hash}
+      }), /too low/);
+    });
+
+    it('fetches the trusted block and its ancestors for a fresh database',
+      async () => {
+        const asked = [];
+        const chain = await open({...trusted, getHeaders: async (t) => {
+          asked.push(t);
+          return headers;
+        }});
+        try {
+          assert.deepStrictEqual(asked, [{...trusted, count: COUNT}]);
+          assert.strictEqual(chain.height, TRUSTED);
+          assert.strictEqual(chain.tip.rhash(), trusted.hash);
+          const first = await chain.getEntryByHeight(TRUSTED - COUNT + 1);
+          assert.strictEqual(first.rhash(), rhash(headers[0]));
+          assert.strictEqual(
+            await chain.getEntryByHeight(TRUSTED - COUNT), null);
+        } finally {
+          await chain.close();
+        }
+      });
+
+    it('reopens from the database without fetching', async () => {
+      await (await open({...trusted, getHeaders: async () => headers})).close();
+
+      const chain = await open({...trusted, getHeaders: async () => {
+        throw new Error('fetched on reopen');
+      }});
+      try {
+        assert.strictEqual(chain.tip.rhash(), trusted.hash);
+      } finally {
+        await chain.close();
+      }
+    });
+
+    it('refuses to reopen a database from another anchor', async () => {
+      await (await open({...trusted, getHeaders: async () => headers})).close();
+
+      const other = chainOf(COUNT);
+      await assert.rejects(open({
+        height: TRUSTED, hash: rhash(other[COUNT - 1]),
+        getHeaders: async () => other
+      }), /not created from this anchor/);
+    });
+
+    it('refuses a database that holds the trusted block but starts lower',
+      async () => {
+        // One more header below, chained to the same trusted block.
+        const below = chainOf(1)[0];
+        const longer = [below, ...headers];
+        const block = headerBlock(longer[1]);
+        block.prevBlock = headerBlock(below).hash();
+        longer[1] = block.toHead();
+        for (let i = 2; i < longer.length; i++) {
+          const b = headerBlock(longer[i]);
+          b.prevBlock = headerBlock(longer[i - 1]).hash();
+          longer[i] = b.toHead();
+        }
+        const top = {height: TRUSTED, hash: rhash(longer[longer.length - 1])};
+
+        await (await open({height: TRUSTED - COUNT, headers: longer})).close();
+        await assert.rejects(open({...top, getHeaders: async () => {
+          throw new Error('fetched on reopen');
+        }}), /not created from this anchor/);
+      });
+
+    it('refuses headers that are too few, broken or end elsewhere, '
+      + 'and writes nothing', async () => {
+      const broken = [...headers];
+      broken[3] = chainOf(1)[0];
+      const cases = [
+        [headers.slice(1), /needs 11 headers/],
+        [broken, /do not chain/],
+        [chainOf(COUNT), /do not end at the trusted block/]
+      ];
+      for (const [given, error] of cases) {
+        await assert.rejects(
+          open({...trusted, getHeaders: async () => given}), error);
+      }
+
+      // Still fresh: a correct fetch now creates it.
+      const chain = await open({...trusted, getHeaders: async () => headers});
+      assert.strictEqual(chain.tip.rhash(), trusted.hash);
+      await chain.close();
+    });
+
+    it('refuses a fresh database with no way to fetch headers', async () => {
+      await assert.rejects(open({...trusted}), /no way to fetch headers/);
+    });
+
+    it('gets its headers from a pool built on the chain', () => {
+      const chain = new Chain({
+        network, memory: true, spv: true, anchor: {...trusted}
+      });
+      const pool = new Pool({network, chain, spv: true, listen: false});
+      assert.strictEqual(typeof chain.options.anchor.getHeaders, 'function');
+      assert(pool);
+    });
+
+    describe('Pool#fetchAnchor', function() {
+      const saved = {};
+      const byHash = new Map(headers.map(h => [headerBlock(h).hash()
+        .toString('hex'), h]));
+      let destroyed;
+
+      before(() => {
+        for (const name of ['connect', 'open', 'sendFilterLoad', 'destroy'])
+          saved[name] = Peer.prototype[name];
+        Peer.prototype.connect = function(addr) {
+          this.address = addr;
+        };
+        Peer.prototype.open = async function() {
+          if (this.address.host === '10.0.0.2')
+            throw new Error('connection refused');
+        };
+        Peer.prototype.sendFilterLoad = function() {};
+        Peer.prototype.destroy = function() {
+          destroyed.push(this.address.host);
+        };
+      });
+
+      after(() => {
+        Object.assign(Peer.prototype, saved);
+      });
+
+      const poolWith = (nodes, maxOutbound) => {
+        const chain = new Chain({
+          network, memory: true, spv: true, anchor: {...trusted}
+        });
+        const pool = new Pool({
+          network, chain, spv: true, listen: false, nodes, maxOutbound
+        });
+        // 10.0.0.1 never answers; 10.0.0.3 serves the chain above.
+        pool.requestHeader = (peer, hash) => {
+          if (peer.address.host === '10.0.0.1')
+            return new Promise(() => {});
+          return Promise.resolve(byHash.get(hash.toString('hex')));
+        };
+        return pool;
+      };
+
+      beforeEach(() => {
+        destroyed = [];
+      });
+
+      it('asks peers at once and takes the first complete walk', async () => {
+        const pool = poolWith(['10.0.0.1:8333', '10.0.0.2:8333',
+          '10.0.0.3:8333'], 2);
+        const got = await pool.fetchAnchor({...trusted, count: COUNT});
+        assert.deepStrictEqual(got.map(h => h.toString('hex')),
+          headers.map(h => h.toString('hex')));
+        // The silent peer was still waiting, and is dropped.
+        assert(destroyed.includes('10.0.0.1'));
+        assert(destroyed.includes('10.0.0.2'));
+      });
+
+      it('fails when no peer can serve the headers', async () => {
+        const pool = poolWith(['10.0.0.2:8333'], 2);
+        await assert.rejects(pool.fetchAnchor({...trusted, count: COUNT}),
+          /connection refused/);
+      });
     });
   });
 });
