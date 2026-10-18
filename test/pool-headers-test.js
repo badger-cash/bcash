@@ -45,11 +45,18 @@ function fakePeer(height = 1e6) {
     txMap: new BufferMap(),
     compactBlocks: new BufferMap(),
     requested: [],
+    getHeaders: [],
+    getBlocks: [],
     hostname: () => `10.0.0.${id}:18444`,
     getBlock(items) {
       this.requested.push(...items);
     },
-    sendGetHeaders() {},
+    sendGetHeaders(locator, stop) {
+      this.getHeaders.push({locator, stop});
+    },
+    sendGetBlocks(locator, stop) {
+      this.getBlocks.push({locator, stop});
+    },
     reject() {},
     destroy() {
       this.destroyed = true;
@@ -65,10 +72,21 @@ function fakeBlock(node, size = 300) {
   return {hash: () => node.hash, getSize: () => size, time: 0, bits: 0};
 }
 
+// Headers linked from `prev`, the last one hashing to `last`.
+function fakeHeaders(prev, count, last) {
+  const headers = [];
+  for (let i = 0; i < count; i++) {
+    const hash = i === count - 1 ? last : randomBytes(32);
+    headers.push({prevBlock: prev, hash: () => hash, verify: () => true});
+    prev = hash;
+  }
+  return headers;
+}
+
 describe('Pool headers-first', function() {
   this.timeout(60000);
 
-  let blocks, chain, pool, connected, nodes;
+  let blocks, chain, pool, connected, nodes, checkpoints, lastCheckpoint;
 
   // A header chain of `length` blocks, as _handleHeaders leaves it once
   // the checkpoint header has arrived. The last entry is the checkpoint.
@@ -114,6 +132,15 @@ describe('Pool headers-first', function() {
       connected.push(block.hash());
       return {hash: block.hash()};
     };
+    chain.getLocator = async hash => [hash];
+
+    checkpoints = network.checkpoints;
+    lastCheckpoint = network.lastCheckpoint;
+  });
+
+  afterEach(() => {
+    network.checkpoints = checkpoints;
+    network.lastCheckpoint = lastCheckpoint;
   });
 
   beforeEach(() => {
@@ -315,5 +342,80 @@ describe('Pool headers-first', function() {
     }
 
     assert.strictEqual(connected.length, gap);
+  });
+
+  // The loader for a segment of `length` blocks ending at checkpoint
+  // `nodes[length - 1]`, followed by checkpoint `next` (if any).
+  function setSegment(length, next) {
+    setHeaders(length);
+    const tip = nodes[length - 1];
+    network.checkpoints = [{hash: tip.hash, height: tip.height}];
+    if (next)
+      network.checkpoints.push(next);
+    network.lastCheckpoint = (next || tip).height;
+
+    const [loader] = addPeers(1);
+    loader.loader = true;
+    pool.peers.load = loader;
+    return loader;
+  }
+
+  async function deliverAll(peer, list) {
+    for (const node of list)
+      await deliver(peer, node);
+  }
+
+  it('crosses a checkpoint into the next segment', async () => {
+    const next = {hash: randomBytes(32), height: 100};
+    const loader = setSegment(50, next);
+    const checkpoint = nodes[49];
+
+    pool.requestHeaderBlocks();
+    await deliverAll(loader, nodes);
+
+    // The checkpoint block stays as the anchor for the next headers.
+    assert.strictEqual(connected.length, 50);
+    assert.strictEqual(pool.headerChain.head, checkpoint);
+    assert(pool.headerTip.hash.equals(next.hash));
+    const ask = loader.getHeaders[loader.getHeaders.length - 1];
+    assert(ask.locator[0].equals(checkpoint.hash));
+    assert(ask.stop.equals(next.hash));
+
+    // Nothing more is requested until those headers are in.
+    pool.requestHeaderBlocks();
+    assert.strictEqual(loader.blockMap.size, 0);
+
+    const headers = fakeHeaders(checkpoint.hash, 50, next.hash);
+    await pool._handleHeaders(loader, {items: headers});
+
+    assert.strictEqual(pool.headerChain.head.height, 51);
+    assert(loader.blockMap.size > 0, 'next segment not requested');
+
+    const segment = [];
+    for (let node = pool.headerChain.head; node; node = node.next)
+      segment.push(node);
+    assert.strictEqual(segment.length, 50);
+
+    // The second segment ends at the last checkpoint.
+    await deliverAll(loader, segment);
+    assert.strictEqual(connected.length, 100);
+    assert(connected[99].equals(next.hash));
+  });
+
+  it('switches to getblocks at the last checkpoint', async () => {
+    const loader = setSegment(50);
+    const last = nodes[49];
+
+    pool.requestHeaderBlocks();
+    await deliverAll(loader, nodes);
+
+    assert.strictEqual(connected.length, 50);
+    assert.strictEqual(pool.checkpoints, false);
+    assert.strictEqual(pool.headerIndex.size, 0);
+    assert.strictEqual(pool.blockBuffer.size, 0);
+    assert.strictEqual(pool.headerNext, null);
+
+    assert.strictEqual(loader.getBlocks.length, 1);
+    assert(loader.getBlocks[0].locator[0].equals(last.hash));
   });
 });
