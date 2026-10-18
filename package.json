@@ -89,7 +89,8 @@
     "nan"
   ],
   "devDependencies": {
-    "bmocha": "git+https://github.com/bcoin-org/bmocha.git#semver:=2.1.2"
+    "bmocha": "git+https://github.com/bcoin-org/bmocha.git#semver:=2.1.2",
+    "eslint": "8.57.1"
   },
   "main": "./lib/bcoin.js",
   "bin": {

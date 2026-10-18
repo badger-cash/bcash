@@ -25,7 +25,8 @@ const {twentyMinute: window} = require('./data/testnet-asert-headers');
 const network = Network.get('testnet');
 const spacing = network.pow.targetSpacing;
 
-const toBlock = hex => Block.fromRaw(Buffer.concat([Buffer.from(hex, 'hex'), Buffer.from([0])]));
+const toBlock = hex => Block.fromRaw(
+  Buffer.concat([Buffer.from(hex, 'hex'), Buffer.from([0])]));
 
 describe('Miner updateTime', function() {
   this.timeout(30000);

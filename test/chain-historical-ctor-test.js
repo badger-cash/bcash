@@ -29,7 +29,9 @@ const workers = new WorkerPool({enabled: false});
 
 function createChain(checkpoints) {
   const blocks = new BlockStore({memory: true, network});
-  const chain = new Chain({memory: true, blocks, network, workers, checkpoints});
+  const chain = new Chain({
+    memory: true, blocks, network, workers, checkpoints
+  });
   return {blocks, chain};
 }
 
@@ -74,7 +76,7 @@ describe('Chain historical CTOR', function() {
     }
   });
 
-  it('runs with Magnetic Anomaly active and blocks in the historical range', () => {
+  it('runs with Magnetic Anomaly active, below the last checkpoint', () => {
     assert.strictEqual(network.block.magneticAnomalyHeight, 0);
     assert(historical.chain.isHistorical(historical.chain.tip));
     assert(!verified.chain.isHistorical(verified.chain.tip));
@@ -126,7 +128,8 @@ describe('Chain historical CTOR', function() {
     for (const block of mined)
       assert(await verified.chain.add(block));
 
-    assert.strictEqual(verified.chain.tip.rhash(), historical.chain.tip.rhash());
+    assert.strictEqual(
+      verified.chain.tip.rhash(), historical.chain.tip.rhash());
 
     for (const {chain} of [historical, verified]) {
       assert(!await chain.db.getCoin(parent.hash(), 0), 'parent output spent');
