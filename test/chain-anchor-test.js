@@ -230,6 +230,28 @@ describe('Chain anchor', function() {
         await assert.rejects(chain.add(block, common.flags.VERIFY_POW), /high-hash/);
     });
 
+    it('counts as synced once its tip is recent, with work only from '
+      + 'the anchor', async () => {
+      const recent = mine(randomBytes(32), Math.floor(Date.now() / 1000),
+        EASY_BITS);
+      const fresh = new Chain({
+        network, memory: true, spv: true,
+        anchor: {height: 971000, headers: [recent.toHead()]}
+      });
+      let full = false;
+      fresh.once('full', () => {
+        full = true;
+      });
+      await fresh.open();
+      try {
+        assert(fresh.tip.chainwork.lt(network.pow.chainwork));
+        assert.strictEqual(fresh.synced, true);
+        assert.strictEqual(full, true);
+      } finally {
+        await fresh.close();
+      }
+    });
+
     it('still knows nothing below the anchor', async () => {
       assert.strictEqual(await chain.getEntryByHeight(970999), null);
       const locator = await chain.getLocator();
