@@ -216,3 +216,16 @@ describe('Pool#scanRange', function() {
     }, async () => {}), /No header at height/);
   });
 });
+
+describe('Pool#directHosts', function() {
+  it('dials each host once for a job of its own', async () => {
+    const chain = new Chain({network, memory: true, spv: true});
+    const pool = new Pool({
+      network, chain, spv: true, memory: true, listen: false,
+      nodes: ['10.0.0.1:18444', '10.0.0.2:18444', '10.0.0.1:18444']
+    });
+    const hosts = await pool.directHosts();
+    assert.deepStrictEqual(hosts.map(a => a.hostname),
+      ['10.0.0.1:18444', '10.0.0.2:18444']);
+  });
+});
