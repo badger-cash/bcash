@@ -8,6 +8,7 @@ const common = require('./util/common');
 const {BloomFilter} = require('bfilter');
 const {BufferMap} = require('buffer-map');
 const Block = require('../lib/primitives/block');
+const MemBlock = require('../lib/primitives/memblock');
 const MerkleBlock = require('../lib/primitives/merkleblock');
 const consensus = require('../lib/protocol/consensus');
 const Script = require('../lib/script/script');
@@ -148,6 +149,32 @@ describe('Block', function() {
     assert.strictEqual(sigops, 1320);
     assert.strictEqual(reward, 2507773345);
     assert.strictEqual(reward, block.txs[0].outputs[0].value);
+  });
+
+  it('should compute a mem block\'s merkle root without parsing', () => {
+    for (const vector of [block300025, block426884, block898352]) {
+      const [block] = vector.getBlock();
+      const mem = MemBlock.fromRaw(block.toRaw());
+      assert.bufferEqual(mem.createMerkleRoot(), block.createMerkleRoot());
+      assert.bufferEqual(mem.createMerkleRoot(), mem.merkleRoot);
+      assert.strictEqual(mem.createMerkleRoot('hex'),
+        block.createMerkleRoot('hex'));
+    }
+  });
+
+  it('should not give a tampered mem block its header\'s root', () => {
+    const [block] = block300025.getBlock();
+
+    // A transaction short: the count and the bytes both say so.
+    const short = Block.fromRaw(block.toRaw());
+    short.txs.pop();
+    short.refresh();
+    const mem = MemBlock.fromRaw(short.toRaw());
+    assert(!mem.createMerkleRoot().equals(mem.merkleRoot));
+
+    // Trailing bytes after the last transaction.
+    const raw = Buffer.concat([block.toRaw(), Buffer.from([0])]);
+    assert.strictEqual(MemBlock.fromRaw(raw).createMerkleRoot(), null);
   });
 
   it('should fail with a bad merkle root', () => {
