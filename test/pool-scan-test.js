@@ -23,6 +23,7 @@ const MerkleBlock = require('../lib/primitives/merkleblock');
 const MTX = require('../lib/primitives/mtx');
 const Script = require('../lib/script/script');
 const Network = require('../lib/protocol/network');
+const Headers = require('../lib/primitives/headers');
 const common = require('../lib/net/common');
 
 const network = Network.get('regtest');
@@ -419,5 +420,74 @@ describe('Pool#scanRange with full blocks', function() {
     // The cap's three, one request a peer made before the cap was reached,
     // and the block being handed on.
     assert(peak <= 3 + 2 + 1, `peak ${peak} blocks`);
+  });
+});
+
+describe('Pool#syncHeaders', function() {
+  this.timeout(60000);
+
+  // More than one getheaders answer's worth.
+  const TOTAL = 2100;
+  const blocks = buildBlocks(randomBytes(20), TOTAL);
+  const index = new Map(blocks.map((b, i) => [b.hash().toString('hex'), i]));
+  let chain, behaviour, asked;
+
+  stubPeers({
+    connect(addr) {
+      this.address = addr;
+    },
+    async open() {},
+    destroy() {
+      this.emit('close');
+    },
+    sendGetHeaders(locator) {
+      const how = behaviour(this);
+      asked.push(this.address.host);
+      setImmediate(() => {
+        if (how === 'junk') {
+          const stray = buildBlocks(randomBytes(20), 2);
+          const items = stray.map(b => Headers.fromBlock(b));
+          this.emit('packet', new packets.HeadersPacket(items));
+          return;
+        }
+        const from = index.get(locator[0].toString('hex')) + 1;
+        const next = blocks.slice(from, from + 2000)
+          .map(b => Headers.fromBlock(b));
+        this.emit('packet', new packets.HeadersPacket(next));
+      });
+    }
+  });
+
+  beforeEach(async () => {
+    asked = [];
+    chain = new Chain({
+      network, memory: true, spv: true,
+      anchor: {height: START, headers: [blocks[0].toHead()]}
+    });
+    await chain.open();
+  });
+
+  afterEach(async () => {
+    await chain.close();
+  });
+
+  const poolWith = nodes => new Pool({
+    network, chain, spv: true, memory: true, listen: false, nodes
+  });
+
+  it('brings the chain to the tip, 2000 headers a request', async () => {
+    behaviour = () => 'serve';
+    const tip = await poolWith(['10.0.0.1:18444']).syncHeaders();
+    assert.strictEqual(tip.height, START + TOTAL - 1);
+    assert.strictEqual(chain.tip.rhash(), blocks[TOTAL - 1].rhash());
+    assert.strictEqual(asked.length, 2);
+  });
+
+  it('moves on from a peer whose headers do not connect', async () => {
+    const hosts = {'10.0.0.1': 'junk'};
+    behaviour = peer => hosts[peer.address.host] || 'serve';
+    const pool = poolWith(['10.0.0.1:18444', '10.0.0.2:18444']);
+    const tip = await pool.syncHeaders();
+    assert.strictEqual(tip.height, START + TOTAL - 1);
   });
 });
