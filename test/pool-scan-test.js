@@ -18,10 +18,12 @@ const Pool = require('../lib/net/pool');
 const Peer = require('../lib/net/peer');
 const packets = require('../lib/net/packets');
 const Block = require('../lib/primitives/block');
+const MemBlock = require('../lib/primitives/memblock');
 const MerkleBlock = require('../lib/primitives/merkleblock');
 const MTX = require('../lib/primitives/mtx');
 const Script = require('../lib/script/script');
 const Network = require('../lib/protocol/network');
+const common = require('../lib/net/common');
 
 const network = Network.get('regtest');
 const START = 1000;
@@ -35,20 +37,32 @@ const payTo = (hash) => {
   return mtx.toTX();
 };
 
-// COUNT chained blocks of a few transactions; every fifth pays `watched`.
-const buildBlocks = (watched) => {
+// A coinbase at `height`, so a full block passes its body checks.
+const coinbase = (height) => {
+  const mtx = new MTX();
+  mtx.addInput({prevout: {hash: Buffer.alloc(32), index: 0xffffffff},
+    script: Script.fromRaw(Buffer.from([4, height, 0, 0, 0]))});
+  mtx.addOutput(Script.fromPubkeyhash(randomBytes(20)), 5000);
+  return mtx.toTX();
+};
+
+// COUNT chained blocks of a few transactions; every fifth pays `watched`,
+// and `extra(i)` gives any more transactions for block i.
+const buildBlocks = (watched, count = COUNT, extra = () => []) => {
   const blocks = [];
   let prev = randomBytes(32);
-  for (let i = 0; i < COUNT; i++) {
+  for (let i = 0; i < count; i++) {
     const block = new Block({
       version: 1, prevBlock: prev, merkleRoot: Buffer.alloc(32),
       time: 1700000000 + i * 600,
       bits: 0x207fffff, nonce: 0
     });
+    block.txs.push(coinbase(i));
     block.txs.push(payTo(randomBytes(20)));
     if (i % 5 === 0)
       block.txs.push(payTo(watched));
     block.txs.push(payTo(randomBytes(20)));
+    block.txs.push(...extra(i));
     block.merkleRoot = block.createMerkleRoot();
     // Work for the easy regtest target, as a merkleblock must carry.
     for (block.refresh(); !block.verifyPOW(); block.refresh())
@@ -102,7 +116,9 @@ describe('Pool#scanRange', function() {
         for (const hash of hashes) {
           const block = byHash.get(hash.toString('hex'));
           if (how === 'full') {
-            this.emit('packet', new packets.BlockPacket(block));
+            // As a peer's would arrive: parsed from the wire, a MemBlock.
+          const raw = new packets.BlockPacket(block).toRaw();
+          this.emit('packet', packets.BlockPacket.fromRaw(raw));
             continue;
           }
           const source = how === 'lie'
@@ -150,7 +166,7 @@ describe('Pool#scanRange', function() {
   };
   const expected = () => blocks.map((b, i) => ({
     height: START + i,
-    txs: i % 5 === 0 ? [b.txs[1].txid()] : []
+    txs: i % 5 === 0 ? [b.txs[2].txid()] : []
   }));
 
   it('delivers every block in height order with its matches', async () => {
@@ -227,5 +243,181 @@ describe('Pool#directHosts', function() {
     const hosts = await pool.directHosts();
     assert.deepStrictEqual(hosts.map(a => a.hostname),
       ['10.0.0.1:18444', '10.0.0.2:18444']);
+  });
+});
+
+// Replace Peer methods for one describe block, restoring them after.
+const stubPeers = (methods) => {
+  const saved = {};
+  before(() => {
+    for (const [name, fn] of Object.entries(methods)) {
+      saved[name] = Peer.prototype[name];
+      Peer.prototype[name] = fn;
+    }
+  });
+  after(() => {
+    Object.assign(Peer.prototype, saved);
+  });
+};
+
+// More legacy sigops than the limit eCash dropped for SigChecks: valid
+// since Phonon, and in real blocks (mainnet 922709).
+const sigopsHeavy = () => {
+  const mtx = new MTX();
+  mtx.addInput({prevout: {hash: randomBytes(32), index: 0}});
+  mtx.addOutput(Script.fromRaw(Buffer.alloc(25000, 0xac)), 0);
+  return mtx.toTX();
+};
+
+describe('Pool#scanRange with full blocks', function() {
+  this.timeout(20000);
+
+  const blocks = buildBlocks(randomBytes(20), COUNT,
+    i => (i === 3 ? [sigopsHeavy()] : []));
+  const byHash = new Map(blocks.map(b => [b.hash().toString('hex'), b]));
+  let chain, behaviour, requested;
+
+  stubPeers({
+    connect(addr) {
+      this.address = addr;
+    },
+    async open() {
+      this.services = behaviour(this) === 'pruned'
+        ? common.services.NETWORK_LIMITED
+        : common.services.NETWORK;
+    },
+    destroy() {
+      this.emit('close');
+    },
+    getItems(type, hashes) {
+      const how = behaviour(this);
+      for (const h of hashes)
+        requested.push([this.address.host, h.toString('hex')]);
+      // 'late' answers a little later, and gets the first block wrong.
+      const first = blocks[0].hash().equals(hashes[0]);
+      const answer = how === 'late' ? cb => setTimeout(cb, 100) : setImmediate;
+      answer(() => {
+        for (const hash of hashes) {
+          let block = byHash.get(hash.toString('hex'));
+          if (how === 'tamper' || (how === 'late' && first)) {
+            // The real header, a transaction short: the root no longer fits.
+            block = Block.fromRaw(block.toRaw());
+            block.txs.pop();
+            // Drop the serialization cached from fromRaw.
+            block.refresh();
+          }
+          // As a peer's would arrive: parsed from the wire, a MemBlock.
+          const raw = new packets.BlockPacket(block).toRaw();
+          this.emit('packet', packets.BlockPacket.fromRaw(raw));
+        }
+      });
+    }
+  });
+
+  before(async () => {
+    chain = new Chain({
+      network, memory: true, spv: true,
+      anchor: {height: START, headers: blocks.map(b => b.toHead())}
+    });
+    await chain.open();
+  });
+
+  after(async () => {
+    await chain.close();
+  });
+
+  beforeEach(() => {
+    requested = [];
+  });
+
+  const poolWith = nodes => new Pool({
+    network, chain, spv: true, memory: true, listen: false, nodes
+  });
+  const scan = async (pool, options = {}, slow = 0) => {
+    const seen = [];
+    await pool.scanRange({start: START, end: START + COUNT - 1, full: true,
+      ...options}, async (entry, block) => {
+      if (slow)
+        await new Promise(r => setTimeout(r, slow));
+      seen.push({height: entry.height, txs: block.txs.map(tx => tx.txid())});
+    });
+    return seen;
+  };
+
+  it('delivers every block whole, in order, with no filter', async () => {
+    behaviour = () => 'serve';
+    const seen = await scan(poolWith(['10.0.0.1:18444', '10.0.0.2:18444']));
+    assert.deepStrictEqual(seen, blocks.map((b, i) => ({
+      height: START + i, txs: b.txs.map(tx => tx.txid())
+    })));
+  });
+
+  it('refuses a block whose transactions do not reach its root', async () => {
+    const hosts = {'10.0.0.1': 'tamper'};
+    behaviour = peer => hosts[peer.address.host] || 'serve';
+    const seen = await scan(poolWith(['10.0.0.1:18444', '10.0.0.2:18444']));
+    assert.strictEqual(seen.length, COUNT);
+    assert(seen.every((s, i) => s.txs.length === blocks[i].txs.length));
+  });
+
+  it('asks only peers that serve the full chain', async () => {
+    const hosts = {'10.0.0.1': 'pruned'};
+    behaviour = peer => hosts[peer.address.host] || 'serve';
+    await scan(poolWith(['10.0.0.1:18444', '10.0.0.2:18444']));
+    assert(requested.every(([host]) => host === '10.0.0.2'));
+  });
+
+  it('fetches the next block to deliver when full', async function() {
+    // The first block's peer fails it only after the other peer has filled
+    // the buffer with the blocks after it.
+    this.timeout(5000);
+    const hosts = {'10.0.0.1': 'late'};
+    behaviour = peer => hosts[peer.address.host] || 'serve';
+    const seen = await scan(poolWith(['10.0.0.1:18444', '10.0.0.2:18444']),
+      {maxBytes: blocks[0].getSize() * 2});
+    assert.strictEqual(seen.length, COUNT);
+  });
+
+  it('keeps blocks serialized until handed on, then parses', async () => {
+    behaviour = () => 'serve';
+    const pool = poolWith(['10.0.0.1:18444']);
+    const peer = pool.createDirectPeer();
+    peer.connect(pool.hosts.nodes[0]);
+    const kept = await pool.requestFullBlocks(peer,
+      blocks.slice(0, 3).map(b => b.hash()), 1000);
+    peer.destroy();
+    assert(kept.every(b => b instanceof MemBlock));
+
+    const handed = [];
+    await pool.scanRange({start: START, end: START + 2, full: true},
+      async (entry, block) => handed.push(block));
+    assert(handed.every(b => b instanceof Block && b.txs.length > 0));
+  });
+
+  it('holds no more than maxBytes of blocks at once', async () => {
+    behaviour = () => 'serve';
+    const size = blocks[0].getSize();
+    const maxBytes = size * 3;
+    let outstanding = 0;
+    let peak = 0;
+    const pool = poolWith(['10.0.0.1:18444', '10.0.0.2:18444']);
+    const orig = Peer.prototype.getItems;
+    Peer.prototype.getItems = function(type, hashes) {
+      outstanding += hashes.length;
+      peak = Math.max(peak, outstanding);
+      return orig.call(this, type, hashes);
+    };
+    try {
+      await pool.scanRange({start: START, end: START + COUNT - 1, full: true,
+        maxBytes, peers: 2}, async () => {
+        await new Promise(r => setTimeout(r, 2));
+        outstanding -= 1;
+      });
+    } finally {
+      Peer.prototype.getItems = orig;
+    }
+    // The cap's three, one request a peer made before the cap was reached,
+    // and the block being handed on.
+    assert(peak <= 3 + 2 + 1, `peak ${peak} blocks`);
   });
 });
