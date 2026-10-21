@@ -4,6 +4,7 @@
  * Build avalanche proofs for tests.
  */
 
+const BN = require('bcrypto/lib/bn');
 const hash160 = require('bcrypto/lib/hash160');
 const random = require('bcrypto/lib/random');
 const secp256k1 = require('bcrypto/lib/secp256k1');
@@ -66,7 +67,8 @@ function buildProof(options = {}) {
 
 /**
  * Just enough of a chain for ChainStakeVerifier: a tip, a height, its
- * median time past, and coins.
+ * median time past, and coins. For polling blocks, it also mines entries
+ * ({hash, height, chainwork, prevBlock}), with forks and invalid blocks.
  */
 
 class FakeChain {
@@ -111,6 +113,100 @@ class FakeChain {
 
   spendCoin(outpoint) {
     return this.coins.delete(outpoint.toKey().toString('hex'));
+  }
+
+  /*
+   * Blocks
+   */
+
+  initBlocks() {
+    if (this.entries)
+      return;
+
+    this.entries = new Map();
+    this.main = new Map();
+    this.invalid = {
+      hashes: new Set(),
+      has: hash => this.invalid.hashes.has(hash.toString('hex')),
+      add: hash => this.invalid.hashes.add(hash.toString('hex')),
+      remove: hash => this.invalid.hashes.delete(hash.toString('hex'))
+    };
+
+    const base = {
+      hash: random.randomBytes(32),
+      height: this.height,
+      chainwork: new BN(this.height),
+      prevBlock: Buffer.alloc(32)
+    };
+
+    this.entries.set(base.hash.toString('hex'), base);
+    this.setTip(base);
+  }
+
+  /**
+   * Mine a block on prev (the tip by default). It becomes the tip if it
+   * has more work.
+   * @param {Object} [prev]
+   * @returns {Object} The entry.
+   */
+
+  mine(prev) {
+    this.initBlocks();
+
+    prev = prev || this.tip;
+
+    const entry = {
+      hash: random.randomBytes(32),
+      height: prev.height + 1,
+      chainwork: prev.chainwork.addn(1),
+      prevBlock: prev.hash
+    };
+
+    this.entries.set(entry.hash.toString('hex'), entry);
+
+    if (entry.chainwork.gt(this.tip.chainwork))
+      this.setTip(entry);
+
+    return entry;
+  }
+
+  /**
+   * Make an entry the tip, and its chain the main chain.
+   * @param {Object} entry
+   */
+
+  setTip(entry) {
+    this.tip = entry;
+    this.height = entry.height;
+
+    for (const height of [...this.main.keys()]) {
+      if (height > entry.height)
+        this.main.delete(height);
+    }
+
+    for (let e = entry; e; e = this.entries.get(e.prevBlock.toString('hex'))) {
+      const key = e.hash.toString('hex');
+      if (this.main.get(e.height) === key)
+        break;
+      this.main.set(e.height, key);
+    }
+  }
+
+  async getEntryByHash(hash) {
+    if (!this.entries)
+      return null;
+    return this.entries.get(hash.toString('hex')) || null;
+  }
+
+  async getAncestor(entry, height) {
+    let e = entry;
+    while (e && e.height > height)
+      e = this.entries.get(e.prevBlock.toString('hex'));
+    return e && e.height === height ? e : null;
+  }
+
+  async isMainChain(entry) {
+    return this.main.get(entry.height) === entry.hash.toString('hex');
   }
 }
 
