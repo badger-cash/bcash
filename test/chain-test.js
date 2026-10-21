@@ -19,6 +19,7 @@ const common = require('../lib/blockchain/common');
 const util = require('../lib/utils/util');
 const nodejsUtil = require('util');
 const Opcode = require('../lib/script/opcode');
+const KeyRing = require('../lib/primitives/keyring');
 const BlockStore = require('../lib/blockstore/level');
 const opcodes = Script.opcodes;
 
@@ -846,95 +847,113 @@ describe('Chain', function() {
   });
 
   it('should fail to connect too many sigops', async () => {
-    const start = chain.height - 110;
-    const end = chain.height - 100;
-    const job = await cpu.createJob();
+    // Sigops limited blocks and transactions until Phonon, which replaced
+    // them with SigChecks; test them with Phonon past the tip.
+    const phononHeight = network.block.phononHeight;
+    network.block.phononHeight = chain.height + 1000;
 
-    const script = new Script();
+    try {
+      const start = chain.height - 110;
+      const end = chain.height - 100;
+      const job = await cpu.createJob();
 
-    script.pushInt(20);
+      const script = new Script();
 
-    for (let i = 0; i < 20; i++)
-      script.pushData(ZERO_KEY);
+      script.pushInt(20);
 
-    script.pushInt(20);
-    script.pushOp(opcodes.OP_CHECKMULTISIG);
+      for (let i = 0; i < 20; i++)
+        script.pushData(ZERO_KEY);
 
-    script.compile();
+      script.pushInt(20);
+      script.pushOp(opcodes.OP_CHECKMULTISIG);
 
-    for (let i = start; i <= end; i++) {
-      const block = await chain.getBlock(i);
-      const cb = block.txs[0];
+      script.compile();
 
-      if (cb.outputs.length === 2)
-        continue;
+      for (let i = start; i <= end; i++) {
+        const block = await chain.getBlock(i);
+        const cb = block.txs[0];
 
-      const mtx = new MTX();
+        if (cb.outputs.length === 2)
+          continue;
 
-      for (let j = 2; j < cb.outputs.length; j++) {
-        mtx.addTX(cb, j);
-        mtx.inputs[j - 2].script.fromItems([script.toRaw()]);
+        const mtx = new MTX();
+
+        for (let j = 2; j < cb.outputs.length; j++) {
+          mtx.addTX(cb, j);
+          mtx.inputs[j - 2].script.fromItems([script.toRaw()]);
+        }
+
+        mtx.addOutput(wallet.getAddress(), 1);
+        job.pushTX(mtx.toTX());
       }
 
-      mtx.addOutput(wallet.getAddress(), 1);
-      job.pushTX(mtx.toTX());
+      job.sort();
+      job.refresh();
+
+      assert.strictEqual(await mineBlock(job), 'bad-blk-sigops');
+    } finally {
+      network.block.phononHeight = phononHeight;
     }
-
-    job.sort();
-    job.refresh();
-
-    assert.strictEqual(await mineBlock(job), 'bad-blk-sigops');
   });
 
   it('should fail to connect block with too many sigops in tx', async () => {
-    const job = await cpu.createJob();
-    const block = await chain.getBlock(chain.height - 110);
+    // Sigops limited blocks and transactions until Phonon, which replaced
+    // them with SigChecks; test them with Phonon past the tip.
+    const phononHeight = network.block.phononHeight;
+    network.block.phononHeight = chain.height + 1000;
 
-    // create big transactions
-    // to have block bigger than 1 MB (20k sigop per MB limit)
-    const cb = block.txs[0];
-    for (let i = 2; i < 4; i++) {
+    try {
+      const job = await cpu.createJob();
+      const block = await chain.getBlock(chain.height - 110);
+
+      // create big transactions
+      // to have block bigger than 1 MB (20k sigop per MB limit)
+      const cb = block.txs[0];
+      for (let i = 2; i < 4; i++) {
+        const mtx = new MTX();
+
+        mtx.addTX(cb, i);
+        mtx.addOutput(wallet.getAddress(), 1);
+
+        const nulldataOutput = new Output();
+        const nulldataScript = nulldataOutput.script;
+
+        nulldataScript.pushOp(opcodes.OP_RETURN);
+        // half mb
+        nulldataScript.pushData(Buffer.alloc(2 ** 19));
+        nulldataScript.compile();
+
+        mtx.addOutput(nulldataOutput);
+
+        job.pushTX(mtx.toTX());
+      }
+
+      // create tx with more than 20k+ sigops
       const mtx = new MTX();
 
-      mtx.addTX(cb, i);
-      mtx.addOutput(wallet.getAddress(), 1);
+      mtx.addTX(block.txs[0], 4);
 
-      const nulldataOutput = new Output();
-      const nulldataScript = nulldataOutput.script;
+      const output = new Output();
+      const script = output.script;
 
-      nulldataScript.pushOp(opcodes.OP_RETURN);
-      // half mb
-      nulldataScript.pushData(Buffer.alloc(2 ** 19));
-      nulldataScript.compile();
+      for (let i = 0; i < consensus.MAX_TX_SIGOPS; i++)
+        script.pushOp(opcodes.OP_CHECKSIG);
 
-      mtx.addOutput(nulldataOutput);
-
-      job.pushTX(mtx.toTX());
-    }
-
-    // create tx with more than 20k+ sigops
-    const mtx = new MTX();
-
-    mtx.addTX(block.txs[0], 4);
-
-    const output = new Output();
-    const script = output.script;
-
-    for (let i = 0; i < consensus.MAX_TX_SIGOPS; i++)
+      // one more
       script.pushOp(opcodes.OP_CHECKSIG);
 
-    // one more
-    script.pushOp(opcodes.OP_CHECKSIG);
+      script.compile();
 
-    script.compile();
+      mtx.addOutput(output);
 
-    mtx.addOutput(output);
+      job.pushTX(mtx.toTX());
+      job.sort();
+      job.refresh();
 
-    job.pushTX(mtx.toTX());
-    job.sort();
-    job.refresh();
-
-    assert.strictEqual(await mineBlock(job), 'bad-txn-sigops');
+      assert.strictEqual(await mineBlock(job), 'bad-txn-sigops');
+    } finally {
+      network.block.phononHeight = phononHeight;
+    }
   });
 
   it('should activate Graviton', async () => {
@@ -1067,6 +1086,103 @@ describe('Chain', function() {
 
     assert(forked);
     assert.bufferEqual(block2.hash(), chain.tip.hash);
+  });
+
+  describe('SigChecks', function() {
+    // A bare 1-of-20 multisig whose last key is ours: CHECKMULTISIG takes
+    // keys from the top of the stack, so a spend checks one signature, and
+    // counts 20 SigChecks, as Bitcoin ABC counts a legacy multisig (every
+    // key, unless all signatures are null).
+    const key = KeyRing.generate();
+    const multisig = new Script();
+    multisig.pushInt(1);
+    for (let i = 1; i < 20; i++)
+      multisig.pushData(KeyRing.generate().getPublicKey());
+    multisig.pushData(key.getPublicKey());
+    multisig.pushInt(20);
+    multisig.pushOp(opcodes.OP_CHECKMULTISIG);
+    multisig.compile();
+
+    const VALUE = 10000;
+    let fund = null;
+    let next = 0;
+
+    // A transaction spending `count` of the multisig outputs, at 20
+    // SigChecks each.
+    const spend = (count) => {
+      const mtx = new MTX();
+      for (let i = 0; i < count; i++)
+        mtx.addTX(fund, next++);
+      mtx.addOutput(wallet.getReceive(), count * VALUE - 100000);
+      const type = Script.hashType.ALL | Script.hashType.SIGHASH_FORKID;
+      for (let i = 0; i < count; i++) {
+        const sig = mtx.ecdsaSignature(i, multisig, VALUE,
+          key.privateKey, type);
+        mtx.inputs[i].script = new Script().pushInt(0).pushData(sig).compile();
+      }
+      return mtx;
+    };
+
+    const mineWith = async (txs) => {
+      const job = await cpu.createJob();
+      for (const mtx of txs)
+        job.pushTX(mtx.toTX(), mtx.view);
+      job.sort();
+      job.refresh();
+      return mineBlock(job);
+    };
+
+    it('should fund the multisig outputs', async () => {
+      const mtx = new MTX();
+      for (let i = 0; i < 1000; i++)
+        mtx.addOutput({ script: multisig, value: VALUE });
+      await wallet.fund(mtx);
+      wallet.sign(mtx);
+      fund = mtx.toTX();
+      assert.strictEqual(await mineWith([mtx]), 'OK');
+    });
+
+    it('should accept a transaction with MAX_TX_SIGCHECKS', async () => {
+      const mtx = spend(consensus.MAX_TX_SIGCHECKS / 20);
+      const sigchecks = mtx.toTX().check(mtx.view, chain.state.flags);
+      assert.strictEqual(sigchecks, consensus.MAX_TX_SIGCHECKS);
+      assert.strictEqual(await mineWith([mtx]), 'OK');
+    });
+
+    it('should refuse more than MAX_TX_SIGCHECKS', async () => {
+      const mtx = spend(consensus.MAX_TX_SIGCHECKS / 20 + 1);
+      assert.strictEqual(await mineWith([mtx]), 'too-many-sigchecks');
+      next -= mtx.inputs.length; // still unspent
+    });
+
+    it('should accept more than MAX_TX_SIGCHECKS before Phonon', async () => {
+      const phononHeight = network.block.phononHeight;
+      network.block.phononHeight = chain.height + 1000;
+      try {
+        const mtx = spend(consensus.MAX_TX_SIGCHECKS / 20 + 1);
+        assert.strictEqual(await mineWith([mtx]), 'OK');
+      } finally {
+        network.block.phononHeight = phononHeight;
+      }
+    });
+
+    it('should limit a block to its maximum size over 141', async () => {
+      // A 1 MB maximum: 7092 SigChecks, which two of these transactions
+      // (6000) stay within and three (9000) exceed.
+      const maxForkBlockSize = consensus.MAX_FORK_BLOCK_SIZE;
+      consensus.MAX_FORK_BLOCK_SIZE = 1000000;
+      try {
+        assert.strictEqual(
+          consensus.maxBlockSigchecks(consensus.MAX_FORK_BLOCK_SIZE), 7092);
+        const three = [spend(150), spend(150), spend(150)];
+        assert.strictEqual(await mineWith(three), 'bad-blk-sigchecks');
+        next -= 450; // still unspent
+        const two = [spend(150), spend(150)];
+        assert.strictEqual(await mineWith(two), 'OK');
+      } finally {
+        consensus.MAX_FORK_BLOCK_SIZE = maxForkBlockSize;
+      }
+    });
   });
 
   it('should inspect ChainEntry', async () => {

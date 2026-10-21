@@ -36,7 +36,6 @@ const network = node.network;
 const {wdb} = node.require('walletdb');
 
 // May 15th hardfork update
-const PHONON = network.block.phononActivationTime;
 
 let wallet = null;
 let tip1 = null;
@@ -104,7 +103,6 @@ describe('Node', function() {
     miner.mempool = null;
     consensus.COINBASE_MATURITY = 0;
 
-    network.block.phononActivationTime = util.now() + 3600;
     await node.open();
   });
 
@@ -618,8 +616,10 @@ describe('Node', function() {
     assert.strictEqual(result.transactions.length, 2);
     assert.strictEqual(fees, tx1.getFee() + tx2.getFee());
     assert.strictEqual(size, tx1.getSize() + tx2.getSize());
-    assert.strictEqual(result.transactions[0].txid, tx1.txid());
-    assert.strictEqual(result.transactions[1].txid, tx2.txid());
+    // In canonical (txid) order, as eCash orders a block's transactions,
+    // not the order they were made in.
+    const txids = [tx1.txid(), tx2.txid()].sort();
+    assert.deepStrictEqual(result.transactions.map(t => t.txid), txids);
     assert.strictEqual(result.coinbasevalue, 125e7 + fees);
   });
 
@@ -671,7 +671,6 @@ describe('Node', function() {
 
   it('should cleanup', async () => {
     consensus.COINBASE_MATURITY = 100;
-    network.block.phononActivationTime = PHONON;
     await node.close();
   });
 });
