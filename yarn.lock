@@ -267,15 +267,6 @@ bsert@~0.0.13:
   resolved "https://registry.yarnpkg.com/bsert/-/bsert-0.0.13.tgz#60bfe52b70fc920245496ba5ecab33f121749918"
   integrity sha512-gYzSj8I2lDTKvl4aRSYs2CZIpeJugq7RjGhLRG+Jl//gEW5B2u1MKB6exVCL09FqYj6JRQAAgRwQHMOWvr7A8A==
 
-bsip@^0.1.8:
-  version "0.1.9"
-  resolved "https://registry.yarnpkg.com/bsip/-/bsip-0.1.9.tgz#5fc7667ada17eb5c285b5634acbf5e6dc45eebda"
-  integrity sha512-i7cVEfCthASPB3BYKS/pZN/D4kh4vToIlSAFcVBLNjzYl1UirT3E2PIGSfNnYR2qZ3UW1qnDavrWEHhLeSKt2A==
-  dependencies:
-    bsert "~0.0.10"
-    loady "~0.0.1"
-    nan "^2.13.1"
-
 "bsock@git+https://github.com/bcoin-org/bsock.git#semver:~0.1.9":
   version "0.1.9"
   resolved "git+https://github.com/bcoin-org/bsock.git#7cf76b3021ae7929c023d1170f789811e91ae528"

@@ -42,7 +42,6 @@
     "brq": "git+https://github.com/bcoin-org/brq.git#semver:~0.1.7",
     "bs32": "git+https://github.com/bcoin-org/bs32.git#semver:=0.1.6",
     "bsert": "git+https://github.com/chjj/bsert.git#semver:~0.0.10",
-    "bsip": "^0.1.8",
     "bsock": "git+https://github.com/bcoin-org/bsock.git#semver:~0.1.9",
     "bsocks": "git+https://github.com/bcoin-org/bsocks.git#semver:~0.2.6",
     "bstring": "^0.3.8",
