@@ -266,12 +266,13 @@ describe('Monolith', function() {
   });
 
   it('should fail BIN2NUM for out of range', async () => {
-    // Values that do not fit in 4 bytes are considered out of range for
-    // BIN2NUM.
-    let stack = new Stack([Buffer.from('abcdefc280', 'hex')]);
+    // Values that do not fit in 8 bytes are considered out of range for
+    // BIN2NUM: script numbers are 63 bits and a sign on eCash, at every
+    // height (Bitcoin ABC's monolith_opcodes_tests).
+    let stack = new Stack([Buffer.from('abcdefc2deadbeef80', 'hex')]);
     isError(stack, Script.fromString('OP_BIN2NUM'), 'INVALID_NUMBER_RANGE');
 
-    stack = new Stack([Buffer.from('0000008080', 'hex')]);
+    stack = new Stack([Buffer.from('000000000000008080', 'hex')]);
     isError(stack, Script.fromString('OP_BIN2NUM'), 'INVALID_NUMBER_RANGE');
   });
 
@@ -341,22 +342,22 @@ describe('Monolith', function() {
     });
 
     it(`should fail ${op} for invalid numbers`, async () => {
-      // CheckOps not valid numbers
+      // CheckOps not valid numbers: more than 8 bytes
       let stack = new Stack([
-        Buffer.from('0102030405', 'hex'),
-        Buffer.from('0102030405', 'hex')
+        Buffer.from('010203040506070809', 'hex'),
+        Buffer.from('010203040506070809', 'hex')
       ]);
       isError(stack, Script.fromString(op), 'UNKNOWN_ERROR');
 
       stack = new Stack([
-        Buffer.from('0102030405', 'hex'),
+        Buffer.from('010203040506070809', 'hex'),
         Buffer.from('01', 'hex')
       ]);
       isError(stack, Script.fromString(op), 'UNKNOWN_ERROR');
 
       stack = new Stack([
         Buffer.from('0105', 'hex'),
-        Buffer.from('0102030405', 'hex')
+        Buffer.from('010203040506070809', 'hex')
       ]);
       isError(stack, Script.fromString(op), 'UNKNOWN_ERROR');
     });

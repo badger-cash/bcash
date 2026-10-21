@@ -11,6 +11,8 @@ const Address = require('../lib/primitives/address');
 const Script = require('../lib/script/script');
 const Outpoint = require('../lib/primitives/outpoint');
 const MTX = require('../lib/primitives/mtx');
+const Input = require('../lib/primitives/input');
+const random = require('bcrypto/lib/random');
 const FullNode = require('../lib/node/fullnode');
 const ChainEntry = require('../lib/blockchain/chainentry');
 const pkg = require('../lib/pkg');
@@ -383,6 +385,48 @@ describe('HTTP', function() {
 
     await nclient.call('rescan', 5);
     assert.deepStrictEqual(matchingBlocks, blocks.slice(4));
+  });
+
+  it('should emit a conflict event to a wallet client', async () => {
+    // A double spend of a transaction with multiple inputs.
+    const w = await wdb.create({id: 'conflicts'});
+    const address = await w.receiveAddress();
+    const cwallet = wclient.wallet(w.id, w.token.toString('hex'));
+    await cwallet.open();
+
+    try {
+      const hash = random.randomBytes(32);
+      const input0 = Input.fromOutpoint(new Outpoint(hash, 0));
+      const input1 = Input.fromOutpoint(new Outpoint(hash, 1));
+
+      const txa = new MTX();
+      txa.addInput(input0);
+      txa.addInput(input1);
+      txa.addOutput(address, 50000);
+      await wdb.addTX(txa.toTX());
+      assert.strictEqual((await w.getBalance()).unconfirmed, 50000);
+
+      // The event arrives over the wallet's socket, after addTX resolves.
+      const conflict = new Promise((resolve, reject) => {
+        const timer = setTimeout(
+          () => reject(new Error('No conflict event')), 5000);
+        cwallet.once('conflict', () => {
+          clearTimeout(timer);
+          resolve();
+        });
+      });
+
+      const txb = new MTX();
+      txb.addInput(input0);
+      txb.addInput(input1);
+      txb.addOutput(address, 49000);
+      await wdb.addTX(txb.toTX());
+
+      await conflict;
+      assert.strictEqual((await w.getBalance()).unconfirmed, 49000);
+    } finally {
+      await cwallet.close();
+    }
   });
 
   it('should cleanup', async () => {

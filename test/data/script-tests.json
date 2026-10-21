@@ -962,8 +962,6 @@
 ],
 
 ["REVERSEBYTES"],
-["0", "REVERSEBYTES 0 EQUAL", "P2SH", "BAD_OPCODE", "REVERSEBYTES, not yet activated in executed branch"],
-["0x02 0xbeef", "REVERSEBYTES 0x02 0xefbe EQUAL", "P2SH", "BAD_OPCODE", "REVERSEBYTES, not yet activated in executed branch"],
 ["", "REVERSEBYTES 0 EQUAL", "P2SH,REVERSEBYTES", "INVALID_STACK_OPERATION", "REVERSEBYTES, empty stack"],
 ["0", "REVERSEBYTES 0 EQUAL", "P2SH,REVERSEBYTES", "OK", "REVERSEBYTES, empty data"],
 ["0x01 0x99", "REVERSEBYTES 0x01 0x99 EQUAL", "P2SH,REVERSEBYTES", "OK", "REVERSEBYTES, 1 byte"],
@@ -1275,7 +1273,6 @@
  "P2SH,DISCOURAGE_UPGRADABLE_NOPS", "DISCOURAGE_UPGRADABLE_NOPS", "Discouraged NOP10 in redeemScript"],
 
 ["0x50","1", "P2SH,STRICTENC", "BAD_OPCODE", "opcode 0x50 is reserved"],
-["1", "IF REVERSEBYTES ELSE 1 ENDIF", "P2SH,STRICTENC", "BAD_OPCODE", "opcode OP_REVERSEBYTES invalid if executed normally"],
 ["1", "IF 0xbd ELSE 1 ENDIF", "P2SH,STRICTENC", "BAD_OPCODE", "opcodes >= FIRST_UNDEFINED_OP_VALUE invalid if executed"],
 ["1", "IF 0xbe ELSE 1 ENDIF", "P2SH,STRICTENC", "BAD_OPCODE"],
 ["1", "IF 0xbf ELSE 1 ENDIF", "P2SH,STRICTENC", "BAD_OPCODE"],

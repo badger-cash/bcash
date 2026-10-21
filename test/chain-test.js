@@ -59,7 +59,6 @@ const wallet = new MemWallet({
   network
 });
 
-const GRAVITON = util.now() + 10;
 
 let tip1 = null;
 let tip2 = null;
@@ -508,6 +507,8 @@ describe('Chain', function() {
 
     spend.addTX(csv, 0);
     spend.setSequence(0, 1, false);
+    // eCash refuses transactions under 100 bytes; pad this one past it.
+    spend.addOutput(Script.fromNulldata(Buffer.alloc(40)), 0);
 
     const job = await cpu.createJob();
 
@@ -533,6 +534,8 @@ describe('Chain', function() {
 
     spend.addTX(csv, 0);
     spend.setSequence(0, 1, false);
+    // eCash refuses transactions under 100 bytes; pad this one past it.
+    spend.addOutput(Script.fromNulldata(Buffer.alloc(40)), 0);
 
     const job = await cpu.createJob();
     job.addTX(spend.toTX(), spend.view);
@@ -568,6 +571,8 @@ describe('Chain', function() {
 
     spend.addTX(csv, 0);
     spend.setSequence(0, 2, false);
+    // eCash refuses transactions under 100 bytes; pad this one past it.
+    spend.addOutput(Script.fromNulldata(Buffer.alloc(40)), 0);
 
     const job = await cpu.createJob();
     job.addTX(spend.toTX(), spend.view);
@@ -717,6 +722,7 @@ describe('Chain', function() {
       job.pushTX(mtxi.toTX());
     }
 
+    job.sort();
     job.refresh();
 
     assert.strictEqual(await mineBlock(job), 'OK');
@@ -874,6 +880,7 @@ describe('Chain', function() {
       job.pushTX(mtx.toTX());
     }
 
+    job.sort();
     job.refresh();
 
     assert.strictEqual(await mineBlock(job), 'bad-blk-sigops');
@@ -924,27 +931,34 @@ describe('Chain', function() {
     mtx.addOutput(output);
 
     job.pushTX(mtx.toTX());
+    job.sort();
     job.refresh();
 
     assert.strictEqual(await mineBlock(job), 'bad-txn-sigops');
   });
 
   it('should activate Graviton', async () => {
+    // Graviton activates by height, as Bitcoin ABC has it for the upgrades
+    // it has passed. Move its height past the tip, then mine up to it.
     const network = chain.network;
+    const gravitonHeight = network.block.gravitonHeight;
+    network.block.gravitonHeight = chain.height + 3;
 
-    const mtp = await chain.getMedianTime(chain.tip);
+    try {
+      const before = await cpu.mineBlock();
+      assert(await chain.add(before));
+      assert.strictEqual(chain.state.hasGraviton(), false);
 
-    // modify activation time for test
-    network.block.gravitonActivationTime = GRAVITON;
-    assert.strictEqual(chain.state.hasGraviton(), false);
+      for (let i = 0; i < 2; i++) {
+        const block = await cpu.mineBlock();
+        assert(await chain.add(block));
+      }
 
-    // make sure we have MTP is more than activationTime
-    for (let i = 0; i < consensus.MEDIAN_TIMESPAN >>> 1; i++) {
-      const block = await cpu.mineBlock();
-      assert(await chain.add(block));
+      assert.strictEqual(chain.height, network.block.gravitonHeight);
+      assert.strictEqual(chain.state.hasGraviton(), true);
+    } finally {
+      network.block.gravitonHeight = gravitonHeight;
     }
-
-    assert.strictEqual(chain.state.hasGraviton(), true);
   });
 
   it('should not mine block with tx smaller than MIN_TX_SIZE', async () => {

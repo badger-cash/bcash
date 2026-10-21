@@ -506,49 +506,6 @@ describe('Wallet', function() {
     assert.strictEqual((await wallet.getBalance()).unconfirmed, 0);
   });
  
-  it('should emit conflict event (multiple inputs)', async () => {
-    const wallet = await wdb.create({id: 'test2'});
-    const address = await wallet.receiveAddress();
-
-    const wclient = new WalletClient({port: ports.wallet});
-    await wclient.open();
-		         
-    const cwallet = wclient.wallet(wallet.id, wallet.token); 
-    await cwallet.open();
-		        
-    try {	
-	  const hash = random.randomBytes(32);
-	  const input0 = Input.fromOutpoint(new Outpoint(hash, 0));
-	  const input1 = Input.fromOutpoint(new Outpoint(hash, 1));
-
-	  const txa = new MTX();
-
-	  txa.addInput(input0);
-	  txa.addInput(input1);
-	  txa.addOutput(address, 50000);
-
-	  await wdb.addTX(txa.toTX());
-	  assert.strictEqual((await wallet.getBalance()).unconfirmed, 50000);
-
-	  let conflict = false;
-	  cwallet.on('conflict', () => {
-	  conflict = true;					         
-	 });
-		
-	 const txb = new MTX();
-
-	 txb.addInput(input0);
-	 txb.addInput(input1);
-         txb.addOutput(address, 49000);
-	 await wdb.addTX(txb.toTX());
-    
-	 assert(conflict);
-         assert.strictEqual((await wallet.getBalance()).unconfirmed, 49000);
-	 } finally {
-	 await wclient.close();	
-	 }
-  });
-
   it('should handle double-spend (multiple inputs)', async () => {
     const wallet = await wdb.create();
     const address = await wallet.receiveAddress();

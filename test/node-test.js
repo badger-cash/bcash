@@ -388,6 +388,8 @@ describe('Node', function() {
 
     spend.addTX(csv, 0);
     spend.setSequence(0, 1, false);
+    // eCash refuses transactions under 100 bytes; pad this one past it.
+    spend.addOutput(Script.fromNulldata(Buffer.alloc(40)), 0);
 
     const job = await miner.createJob();
 
@@ -413,6 +415,8 @@ describe('Node', function() {
 
     spend.addTX(csv, 0);
     spend.setSequence(0, 1, false);
+    // eCash refuses transactions under 100 bytes; pad this one past it.
+    spend.addOutput(Script.fromNulldata(Buffer.alloc(40)), 0);
 
     const job = await miner.createJob();
 
@@ -458,6 +462,8 @@ describe('Node', function() {
 
     spend.addTX(csv, 0);
     spend.setSequence(0, 2, false);
+    // eCash refuses transactions under 100 bytes; pad this one past it.
+    spend.addOutput(Script.fromNulldata(Buffer.alloc(40)), 0);
 
     const job = await miner.createJob();
 
