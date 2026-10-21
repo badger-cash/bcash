@@ -20,11 +20,17 @@
 const dns = require('dns').promises;
 const fs = require('fs');
 const bio = require('bufio');
-const hash256 = require('bcrypto/lib/hash256');
 const Network = require('../lib/protocol/network');
 const Peer = require('../lib/net/peer');
 const NetAddress = require('../lib/net/netaddress');
 const packets = require('../lib/net/packets');
+const util = require('../lib/utils/util');
+const Proof = require('../lib/avalanche/proof');
+const Delegation = require('../lib/avalanche/delegation');
+const {
+  CompactProofs,
+  ProofsRequest
+} = require('../lib/avalanche/compactproofs');
 
 const NODE_AVALANCHE = 1 << 24;
 const MSG_BLOCK = 2;
@@ -46,73 +52,22 @@ const outFile = opt('out', null);
  * Wire formats (Bitcoin ABC src/avalanche/*.h, src/serialize.h).
  */
 
-function readPubkey(br) {
-  return br.readBytes(br.readVarint());
+// A proof, checked as far as it can be without the chain.
+function summarizeProof(proof) {
+  const [valid, reason] = proof.verify();
+  return {proofid: proof.rid(), sequence: proof.sequence.toString(16),
+    expiration: Number(proof.expiration), stakes: proof.stakes.length,
+    amount: proof.getStakedAmount(), valid, reason};
 }
 
-function readStake(br) {
-  const start = br.offset;
-  const txid = br.readHash('hex');
-  const index = br.readU32();
-  const amount = br.readI64();
-  const height = br.readU32();
-  readPubkey(br);
-  const raw = br.data.slice(start, br.offset);
-  const sig = br.readBytes(64);
-  return {txid, index, amount, height: height >>> 1,
-    coinbase: Boolean(height & 1), raw, sig};
-}
-
-// Proof: sequence, expiration, master, stakes, payout script, signature.
-// ProofId = H(LimitedProofId, master); LimitedProofId = H(sequence,
-// expiration, payout script, stakes).
-function readProof(br) {
-  // Sequence numbers and keys are full 64-bit values: keep them as bytes.
-  const sequence = br.readBytes(8);
-  const expiration = br.readI64();
-  const master = readPubkey(br);
-  const count = br.readVarint();
-  const stakes = [];
-  for (let i = 0; i < count; i++)
-    stakes.push(readStake(br));
-  const payout = br.readVarBytes();
-  br.readBytes(64);
-
-  const bw = bio.write(16 + 9 + payout.length + 9
-    + stakes.reduce((n, s) => n + s.raw.length, 0));
-  bw.writeBytes(sequence);
-  bw.writeI64(expiration);
-  bw.writeVarBytes(payout);
-  bw.writeVarint(stakes.length);
-  for (const s of stakes)
-    bw.writeBytes(s.raw);
-  const limited = hash256.digest(bw.slice());
-  const proofid = hash256.digest(Buffer.concat([
-    limited, Buffer.from([master.length]), master]));
-
-  const amount = stakes.reduce((n, s) => n + s.amount, 0);
-  return {proofid: Buffer.from(proofid).reverse().toString('hex'),
-    sequence: sequence.toString('hex'), expiration, stakes: stakes.length,
-    amount};
-}
-
-// Delegation: limited proof id, proof master, levels (pubkey, sig).
+// An all-zero limited proof id means the node has no proof.
 function readDelegation(br) {
-  const limited = br.readBytes(32);
-  const master = readPubkey(br);
-  const levels = br.readVarint();
-  for (let i = 0; i < levels; i++) {
-    readPubkey(br);
-    br.readBytes(64);
-  }
-  const zero = limited.equals(Buffer.alloc(32));
-  let proofid = null;
-  if (!zero) {
-    const id = hash256.digest(Buffer.concat([
-      limited, Buffer.from([master.length]), master]));
-    proofid = Buffer.from(id).reverse().toString('hex');
-  }
-  return {hasProof: !zero, proofid, levels};
+  const dg = Delegation.fromReader(br);
+  if (dg.limitedId.equals(Buffer.alloc(32)))
+    return {hasProof: false, proofid: null, levels: dg.levels.length};
+  const [valid, reason] = dg.verify();
+  return {hasProof: true, proofid: util.revHex(dg.proofId()),
+    levels: dg.levels.length, valid, reason};
 }
 
 // Our hello: an all-zero delegation (no proof), which makes the receiver
@@ -126,29 +81,6 @@ function helloPayload() {
   bw.writeBytes(Buffer.alloc(64));
   bw.writeU32(1024);
   return bw.render();
-}
-
-function readCompactProofs(data) {
-  const br = bio.read(data);
-  br.seek(16); // two SipHash keys
-  const shortids = br.readVarint();
-  br.seek(shortids * 6);
-  const prefilled = [];
-  const n = br.readVarint();
-  for (let i = 0; i < n; i++) {
-    br.readVarint();
-    prefilled.push(readProof(br));
-  }
-  return {count: shortids + n, prefilled};
-}
-
-// Ask for indices 0..n-1, difference encoded: each is 0 after the last.
-function proofsRequest(n) {
-  const bw = bio.write(9 + n * 9);
-  bw.writeVarint(n);
-  for (let i = 0; i < n; i++)
-    bw.writeVarint(0);
-  return bw.slice();
 }
 
 function pollPayload(round, hashes) {
@@ -291,30 +223,40 @@ async function fetchProofs(host) {
     if (!raw)
       return {host, error: 'no avaproofs'};
 
-    const cp = readCompactProofs(raw);
-    for (const p of cp.prefilled)
-      proofs.set(p.proofid, p);
+    const cp = CompactProofs.fromRaw(raw);
+    const sids = new Set(cp.shortIds);
+    const count = cp.size;
+
+    // A proof the node sends us should be one it announced.
+    const add = (proof) => {
+      const summary = summarizeProof(proof);
+      summary.announced = sids.has(cp.sid(proof.id()));
+      proofs.set(summary.proofid, summary);
+    };
+
+    for (const {proof} of cp.prefilled)
+      add(proof);
 
     let last = Date.now();
     peer.on('packet', (p) => {
       if (p.cmd !== 'avaproof')
         return;
       try {
-        const proof = readProof(bio.read(p.data));
-        proofs.set(proof.proofid, proof);
+        add(Proof.fromRaw(p.data));
         last = Date.now();
       } catch (e) {
         // Count it but keep going.
       }
     });
-    const request = proofsRequest(cp.count);
+    const all = [...Array(count).keys()];
+    const request = new ProofsRequest(all).toRaw();
     peer.send(new packets.UnknownPacket('avaproofsreq', request));
 
     // Proofs stream in; stop once we have them all or they stop coming.
-    while (proofs.size < cp.count && Date.now() - last < 15000)
+    while (proofs.size < count && Date.now() - last < 15000)
       await new Promise(r => setTimeout(r, 500));
 
-    return {host, announced: cp.count, proofs: [...proofs.values()]};
+    return {host, announced: count, proofs: [...proofs.values()]};
   } catch (e) {
     return {host, error: e.message};
   } finally {
@@ -404,12 +346,17 @@ async function pool(items, size, fn) {
       sources: fetched,
       count: proofs.length,
       stakes: proofs.reduce((n, p) => n + p.stakes, 0),
+      unannounced: proofs.filter(p => !p.announced).length,
+      invalid: proofs.filter(p => !p.valid)
+        .map(p => ({proofid: p.proofid, reason: p.reason})),
       totalStakeXEC: stake / 100,
       quorumThresholdXEC: 10e9
     },
     perNode: all.map(r => ({host: r.host, reached: r.reached, agent: r.agent,
       height: r.height, avalanche: r.avalanche,
       ownProof: r.delegation ? r.delegation.hasProof : undefined,
+      delegation: r.delegation && r.delegation.hasProof
+        ? r.delegation.reason : undefined,
       genesisVote: r.genesisVote,
       avaAddrs: r.avaAddrs ? r.avaAddrs.length : undefined,
       error: r.error}))
