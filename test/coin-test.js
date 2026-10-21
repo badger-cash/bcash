@@ -18,7 +18,7 @@ describe('Coin', function() {
     assert.strictEqual(coin.getAddress().toBase58(),
       '3KUER9kZ693d5FQgvmr5qNDKnSpP9nXv9v');
     assert.strictEqual(coin.getAddress().toString(),
-      'bitcoincash:prpswjgjta5egualmyvexu5tgzg2023rzc95lgsupf');
+      'ecash:prpswjgjta5egualmyvexu5tgzg2023rzcuetrtx87');
     assert.strictEqual(coin.value, 5000000);
     assert.strictEqual(coin.getType(), 'multisig');
     assert.strictEqual(coin.version, 1);
@@ -35,7 +35,7 @@ describe('Coin', function() {
     assert.strictEqual(coin.getAddress().toBase58(),
       '3KUER9kZ693d5FQgvmr5qNDKnSpP9nXv9v');
     assert.strictEqual(coin.getAddress().toString(),
-      'bitcoincash:prpswjgjta5egualmyvexu5tgzg2023rzc95lgsupf');
+      'ecash:prpswjgjta5egualmyvexu5tgzg2023rzcuetrtx87');
     assert.strictEqual(coin.value, 5000000);
     assert.strictEqual(coin.getType(), 'multisig');
     assert.strictEqual(coin.version, 1);

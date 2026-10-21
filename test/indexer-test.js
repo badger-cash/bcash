@@ -35,12 +35,12 @@ const vectors = [
   // Secret for the public key vectors:
   // cVDJUtDjdaM25yNVVDLLX3hcHUfth4c7tY3rSc4hy9e8ibtCuj6G
   {
-    addr: 'bitcoincash:qzg9x9d3j62f7ljce5hzvu4krq4srv59cgtdgyjdsv',
+    addr: 'ecash:qzg9x9d3j62f7ljce5hzvu4krq4srv59cgjqu0fhkm',
     amount: 1.99,
     label: 'p2pkh'
   },
   {
-    addr: 'bitcoincash:qr23z9xn6fgq0yh4f4k7pg7kl7lrh6temvera4htvr',
+    addr: 'ecash:qr23z9xn6fgq0yh4f4k7pg7kl7lrh6temvqwf7v325',
     amount: 0.11,
     label: 'p2pkh'
   }

@@ -22,17 +22,17 @@
     "wallet"
   ],
   "engines": {
-    "node": ">=10.0.0"
+    "node": ">=18.0.0"
   },
   "dependencies": {
     "bcfg": "git+https://github.com/bcoin-org/bcfg.git#semver:~0.1.6",
-    "bcrypto": "git+https://github.com/bcoin-org/bcrypto.git#semver:~5.0.4",
+    "bcrypto": "git+https://github.com/bcoin-org/bcrypto.git#semver:~5.5.2",
     "bcurl": "git+https://github.com/bcoin-org/bcurl.git#semver:^0.1.6",
     "bdb": "git+https://github.com/bcoin-org/bdb.git#semver:~1.2.1",
     "bdns": "git+https://github.com/bcoin-org/bdns.git#semver:~0.1.5",
     "bevent": "git+https://github.com/bcoin-org/bevent.git#semver:~0.1.5",
     "bfile": "git+https://github.com/bcoin-org/bfile.git#semver:~0.2.1",
-    "bfilter": "git+https://github.com/bcoin-org/bfilter.git#semver:~2.0.0",
+    "bfilter": "git+https://github.com/bcoin-org/bfilter.git#semver:~2.4.0",
     "bheep": "git+https://github.com/bcoin-org/bheep.git#semver:~0.1.5",
     "binet": "git+https://github.com/bcoin-org/binet.git#semver:~0.3.5",
     "blgr": "git+https://github.com/bcoin-org/blgr.git#semver:~0.1.7",
@@ -56,7 +56,7 @@
     "loady": "git+https://github.com/chjj/loady.git#semver:~0.0.1",
     "mrmr": "^0.1.8",
     "n64": "git+https://github.com/chjj/n64.git#semver:~0.2.10",
-    "nan": "git+https://github.com/braydonf/nan.git#semver:=2.14.0"
+    "nan": "^2.23.0"
   },
   "bundleDependencies": [
     "bcfg",
@@ -120,5 +120,8 @@
     "./lib/workers/child": "./lib/workers/child-browser.js",
     "./lib/workers/parent": "./lib/workers/parent-browser.js",
     "./lib/bcoin": "./lib/bcoin-browser.js"
+  },
+  "resolutions": {
+    "nan": "^2.23.0"
   }
 }
