@@ -20,6 +20,8 @@ const Outpoint = require('../lib/primitives/outpoint');
 const Input = require('../lib/primitives/input');
 const Script = require('../lib/script/script');
 const MemWallet = require('./util/memwallet');
+const policy = require('../lib/protocol/policy');
+const Miner = require('../lib/mining/miner');
 const BlockStore = require('../lib/blockstore/level');
 const {BufferSet} = require('buffer-map');
 
@@ -234,6 +236,131 @@ describe('Mempool', function() {
 
     await mempool.addTX(tx.toTX());
     chain.tip.height = 0;
+  });
+
+  // A P2SH 1-of-15 spend: standard, dense enough for INPUT_SIGCHECKS, and
+  // 15 SigChecks, which at 50 bytes each weigh more than the transaction.
+  const multisigSpend = () => {
+    const key = KeyRing.generate();
+    const keys = [];
+    for (let i = 1; i < 15; i++)
+      keys.push(KeyRing.generate().getPublicKey());
+    keys.push(key.getPublicKey());
+    const redeem = new Script();
+    redeem.pushInt(1);
+    for (const pub of keys)
+      redeem.pushData(pub);
+    redeem.pushInt(15);
+    redeem.pushOp(Script.opcodes.OP_CHECKMULTISIG);
+    redeem.compile();
+
+    const tx = new MTX();
+    tx.addCoin(dummyInput(Script.fromScripthash(redeem.hash160()),
+      random.randomBytes(32)));
+    tx.addOutput(wallet.getAddress(), 60000);
+
+    const sig = tx.ecdsaSignature(0, redeem, 70000, key.privateKey, SHTYPE);
+    tx.inputs[0].script = new Script()
+      .pushInt(0)
+      .pushData(sig)
+      .pushData(redeem.toRaw())
+      .compile();
+
+    return tx;
+  };
+
+  it('should count SigChecks, and rate fees on virtual size', async () => {
+    const tx = multisigSpend();
+    await mempool.addTX(tx.toTX());
+
+    const entry = mempool.getEntry(tx.hash());
+    assert.strictEqual(entry.sigchecks, 15);
+    assert(entry.size < 15 * policy.BYTES_PER_SIGCHECK);
+    assert.strictEqual(entry.getVirtualSize(), 15 * policy.BYTES_PER_SIGCHECK);
+    assert.strictEqual(entry.getRate(),
+      policy.getRate(15 * policy.BYTES_PER_SIGCHECK, 10000));
+
+    // Kept when the mempool is persisted.
+    const copy = MempoolEntry.fromRaw(entry.toRaw());
+    assert.strictEqual(copy.sigchecks, 15);
+    assert.strictEqual(copy.getVirtualSize(), entry.getVirtualSize());
+  });
+
+  it('should fill a block template to its SigChecks limit', async () => {
+    // Two 15-SigCheck spends, and a miner with room for one. The miner sees
+    // only them: the mempool's other entries here fund the tests' coins
+    // from nothing, with negative fees no template can price.
+    const entries = [];
+    for (let i = 0; i < 2; i++) {
+      const tx = multisigSpend().toTX();
+      await mempool.addTX(tx);
+      entries.push(mempool.getEntry(tx.hash()));
+    }
+    const view = {
+      tip: mempool.tip,
+      map: new Map(entries.map(e => [e.txid(), e])),
+      hasEntry: () => false
+    };
+
+    // This chain is on mainnet's parameters at its start, before Phonon,
+    // when blocks are packed by sigops; move Phonon to its start.
+    const phononHeight = chain.network.block.phononHeight;
+    chain.network.block.phononHeight = 0;
+    try {
+      const tight = new Miner({ chain, mempool: view, maxSigchecks: 20 });
+      const one = await tight.createBlock(chain.tip, wallet.getAddress());
+      assert.strictEqual(one.items.length, 1);
+      assert.strictEqual(one.sigchecks, 15);
+
+      const roomy = new Miner({ chain, mempool: view, maxSigchecks: 30 });
+      const two = await roomy.createBlock(chain.tip, wallet.getAddress());
+      assert.strictEqual(two.items.length, 2);
+      assert.strictEqual(two.sigchecks, 30);
+    } finally {
+      chain.network.block.phononHeight = phononHeight;
+    }
+  });
+
+  it('should refuse inputs too dense in SigChecks', async () => {
+    // A P2SH 1-of-15 whose redeem script carries a runt key: 15 SigChecks in
+    // a scriptSig too short for them (Bitcoin ABC's "SigChecks on P2SH
+    // CHECKMULTISIG 1-of-15 ECDSA with a runt key"). Under the standard
+    // flags, as the mempool verifies.
+    // CHECKMULTISIG takes keys from the top of the stack, the last pushed:
+    // ours is last, so the runt key is never examined, only counted.
+    const key = KeyRing.generate();
+    const keys = [Buffer.from([0x02])];
+    for (let i = 1; i < 14; i++)
+      keys.push(KeyRing.generate().getPublicKey());
+    keys.push(key.getPublicKey());
+    const redeem = new Script();
+    redeem.pushInt(1);
+    for (const pub of keys)
+      redeem.pushData(pub);
+    redeem.pushInt(15);
+    redeem.pushOp(Script.opcodes.OP_CHECKMULTISIG);
+    redeem.compile();
+
+    const tx = new MTX();
+    tx.addCoin(dummyInput(Script.fromScripthash(redeem.hash160()),
+      random.randomBytes(32)));
+    tx.addOutput(wallet.getAddress(), 60000);
+
+    const sig = tx.ecdsaSignature(0, redeem, 70000, key.privateKey, SHTYPE);
+    tx.inputs[0].script = new Script()
+      .pushInt(0)
+      .pushData(sig)
+      .pushData(redeem.toRaw())
+      .compile();
+
+    let err = null;
+    try {
+      tx.toTX().check(tx.view, Script.flags.STANDARD_VERIFY_FLAGS);
+    } catch (e) {
+      err = e;
+    }
+    assert(err);
+    assert.strictEqual(err.code, 'INPUT_SIGCHECKS');
   });
 
   it('should handle invalid locktime', async () => {
