@@ -93,7 +93,7 @@ describe('Address', function() {
     const addr = Address.fromPubkeyhash(p2pkh);
     assert.strictEqual(
       addr.toString('main'),
-      'bitcoincash:qr35ennsep3hxfe7lnz5ee7j5jgmkjswssk2puzvgv'
+      'ecash:qr35ennsep3hxfe7lnz5ee7j5jgmkjswss084hekwm'
     );
   });
 
@@ -103,7 +103,7 @@ describe('Address', function() {
     const addr = Address.fromPubkeyhash(p2pkh);
     assert.strictEqual(
       addr.toString('main'),
-      'bitcoincash:qq80qvqs0lfxuzmt7sz3909ze6camq9d4gxau4gyg4'
+      'ecash:qq80qvqs0lfxuzmt7sz3909ze6camq9d4glsg7n7wz'
     );
   });
 
@@ -131,7 +131,7 @@ describe('Address', function() {
     const addr = Address.fromScript(script);
     assert.strictEqual(
       addr.toString('main'),
-      'bitcoincash:pruptvpkmxamee0f72sq40gm70wfr624zq0yyxtycm'
+      'ecash:pruptvpkmxamee0f72sq40gm70wfr624zqkfsds77v'
     );
   });
 
@@ -141,7 +141,7 @@ describe('Address', function() {
     const addr = Address.fromScripthash(p2sh);
     assert.strictEqual(
       addr.toString('main'),
-      'bitcoincash:pruptvpkmxamee0f72sq40gm70wfr624zq0yyxtycm'
+      'ecash:pruptvpkmxamee0f72sq40gm70wfr624zqkfsds77v'
     );
   });
 
@@ -151,7 +151,7 @@ describe('Address', function() {
     const addr = Address.fromScripthash(p2sh);
     assert.strictEqual(
       addr.toString('main'),
-      'bitcoincash:pr5vxqxg0xrwl2zvxlq9rxffqx00sm44ks62zuqyrj'
+      'ecash:pr5vxqxg0xrwl2zvxlq9rxffqx00sm44ksr8khm799'
     );
   });
 
@@ -162,14 +162,14 @@ describe('Address', function() {
 
     assert.strictEqual(
       addr.toString('testnet'),
-      'bchtest:przhjdpv93xfygpqtckdc2zkzuzqeyj2pg4x8klehh'
+      'xectest:przhjdpv93xfygpqtckdc2zkzuzqeyj2pgnhhvzu9r'
     );
   });
 
   it('should match p2sh address without prefix', () => {
     const raw = 'c579342c2c4c9220205e2cdc285617040c924a0a';
     const p2sh = Buffer.from(raw, 'hex');
-    const addrstr = 'przhjdpv93xfygpqtckdc2zkzuzqeyj2pg4x8klehh';
+    const addrstr = 'przhjdpv93xfygpqtckdc2zkzuzqeyj2pgnhhvzu9r';
     const addr = Address.fromString(addrstr, 'testnet');
 
     assert.strictEqual(addr.type, 1, 'Incorrect type.');
@@ -179,7 +179,7 @@ describe('Address', function() {
   it('should match mainnet p2pkh cashaddr without prefix', () => {
     const raw = 'e34cce70c86373273efcc54ce7d2a491bb4a0e84';
     const p2pkh = Buffer.from(raw, 'hex');
-    const addrstr = 'qr35ennsep3hxfe7lnz5ee7j5jgmkjswssk2puzvgv';
+    const addrstr = 'qr35ennsep3hxfe7lnz5ee7j5jgmkjswss084hekwm';
     const addr = Address.fromString(addrstr, 'main');
 
     assert.strictEqual(addr.type, 0, 'Incorrect address type.');
@@ -200,12 +200,12 @@ describe('Address', function() {
 
     assert.strictEqual(
       err.message,
-      'Invalid cashaddr checksum.'
+      'Network mismatch for cashaddr address.'
     );
   });
 
   it('should handle invalid cashaddr checksum', () => {
-    const addr = 'bitcoincash:pr5vxqxg0xrwl2zvxlq9rxffqx00sm44ks62zuqyrr';
+    const addr = 'ecash:pruptxcdmxamme0f725q485w3vk0yxkh6grnr209aq';
     assert.throws(() => Address.fromString(addr, 'main'));
 
     let err;
@@ -218,12 +218,12 @@ describe('Address', function() {
 
     assert.strictEqual(
       err.message,
-      'Invalid cashaddr checksum.'
+      'Invalid checksum: ecash:pruptxcdmxamme0f725q485w3vk0yxkh6grnr209aq.'
     );
   });
 
   it('should handle invalid cashaddr type', () => {
-    const addr = 'bitcoincash:zzhgrdtkaz370lfrlx7fc8rvj5yd5nrn7qq3srezys';
+    const addr = 'ecash:zzhgrdtkaz370lfrlx7fc8rvj5yd5nrn7qeuygzcz8';
     assert.throws(() => Address.fromString(addr, 'main'));
 
     let err;
@@ -236,7 +236,7 @@ describe('Address', function() {
 
     assert.strictEqual(
       err.message,
-      'Not a valid address type.'
+      'Invalid address type in version byte: 16.'
     );
   });
 
@@ -254,13 +254,12 @@ describe('Address', function() {
 
     assert.strictEqual(
       err.message,
-      'Invalid cashaddr data length.'
+      'Invalid hash size: bitcoincash:qpg4nt2nwm9mm2a6s6gmcmjx2yr7c9kvta.'
     );
   });
 
   it('should handle cashaddr mixed case', () => {
-    const addr = 'bitcoincash:pruptvpkmxamee0f7'
-               + '2Sq40gm70wfr624zq0yyxtycm';
+    const addr = 'ecash:Pruptxcdmxamme0f725q485w3vk0yxkh6grnr209ag';
     assert.throws(() => Address.fromString(addr, 'main'));
 
     let err;
@@ -274,7 +273,7 @@ describe('Address', function() {
     assert(err, 'Exception error missing.');
     assert.strictEqual(
       err.message,
-      'Invalid cashaddr casing.'
+      'Invalid address: ecash:Pruptxcdmxamme0f725q485w3vk0yxkh6grnr209ag.'
     );
   });
 
@@ -293,7 +292,7 @@ describe('Address', function() {
     assert(err, 'Exception error missing.');
     assert.strictEqual(
       err.message,
-      'Invalid padding in data.'
+      'Input cannot be converted to 8 bits without padding, but strict mode was used.'
     );
   });
 
@@ -312,7 +311,7 @@ describe('Address', function() {
     assert(err, 'Exception error missing.');
     assert.strictEqual(
       err.message,
-      'Non zero padding.'
+      'Input cannot be converted to 8 bits without padding, but strict mode was used.'
     );
   });
 });

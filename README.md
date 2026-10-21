@@ -21,12 +21,20 @@ Try it in the browser: https://bcoin.io/browser/
 
 ## Install
 
+Node.js 18, 20 or 24, and a C/C++ toolchain for the native modules.
+
 ```
-$ git clone git://github.com/bcoin-org/bcash.git
+$ git clone git://github.com/badger-cash/bcash.git
 $ cd bcash
-$ npm install
+$ yarn install
 $ ./bin/bcash
 ```
+
+The native modules (bcrypto, bdb, mrmr, n64, bstring, bsip) build for the
+Node.js in use; each has a JavaScript fallback, so a failed build of bstring
+or bsip only costs speed. bsip's build looks for a `python` executable; on a
+system with only `python3`, install `python-is-python3` or put a `python`
+symlink to it on the PATH.
 
 See the [Beginner's Guide][guide] for more in-depth installation instructions.
 
