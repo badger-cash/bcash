@@ -30,11 +30,9 @@ $ yarn install
 $ ./bin/bcash
 ```
 
-The native modules (bcrypto, bdb, mrmr, n64, bstring, bsip) build for the
-Node.js in use; each has a JavaScript fallback, so a failed build of bstring
-or bsip only costs speed. bsip's build looks for a `python` executable; on a
-system with only `python3`, install `python-is-python3` or put a `python`
-symlink to it on the PATH.
+The native modules (bcrypto, bdb, mrmr, n64, bstring) build for the Node.js
+in use during `yarn install`; none needs `python`. A failed build of bstring
+only costs speed, as it has a JavaScript fallback.
 
 See the [Beginner's Guide][guide] for more in-depth installation instructions.
 
