@@ -19,21 +19,21 @@
 
 const dns = require('dns').promises;
 const fs = require('fs');
-const bio = require('bufio');
 const Network = require('../lib/protocol/network');
 const Peer = require('../lib/net/peer');
 const NetAddress = require('../lib/net/netaddress');
 const packets = require('../lib/net/packets');
 const util = require('../lib/utils/util');
 const Proof = require('../lib/avalanche/proof');
-const Delegation = require('../lib/avalanche/delegation');
+const random = require('bcrypto/lib/random');
+const InvItem = require('../lib/primitives/invitem');
+const {Hello, Poll, Response, invTypes} = require('../lib/avalanche/protocol');
 const {
   CompactProofs,
   ProofsRequest
 } = require('../lib/avalanche/compactproofs');
 
 const NODE_AVALANCHE = 1 << 24;
-const MSG_BLOCK = 2;
 const VOTE_UNKNOWN = 0xffffffff;
 const TIMEOUT = 30000;
 
@@ -60,49 +60,18 @@ function summarizeProof(proof) {
     amount: proof.getStakedAmount(), valid, reason};
 }
 
-// An all-zero limited proof id means the node has no proof.
-function readDelegation(br) {
-  const dg = Delegation.fromReader(br);
-  if (dg.limitedId.equals(Buffer.alloc(32)))
-    return {hasProof: false, proofid: null, levels: dg.levels.length};
-  const [valid, reason] = dg.verify();
-  return {hasProof: true, proofid: util.revHex(dg.proofId()),
+// A node's hello: its delegation, and the signature that binds it to
+// this connection. We send no extra entropy, which ABC reads as 1.
+function readHello(data, version, ourNonce) {
+  const hello = Hello.fromRaw(data);
+  const dg = hello.delegation;
+  if (!hello.hasProof())
+    return {hello, hasProof: false, proofid: null, levels: dg.levels.length};
+  const entropy = version && version.extraEntropy != null
+    ? version.extraEntropy : 1n;
+  const [valid, reason] = hello.verify(version.nonce, ourNonce, entropy, 1n);
+  return {hello, hasProof: true, proofid: util.revHex(dg.proofId()),
     levels: dg.levels.length, valid, reason};
-}
-
-// Our hello: an all-zero delegation (no proof), which makes the receiver
-// skip the signature; a zero signature and our max poll size follow, as
-// in ABC's Hello.
-function helloPayload() {
-  const bw = bio.write(32 + 1 + 1 + 64 + 4);
-  bw.writeBytes(Buffer.alloc(32));
-  bw.writeVarint(0);
-  bw.writeVarint(0);
-  bw.writeBytes(Buffer.alloc(64));
-  bw.writeU32(1024);
-  return bw.render();
-}
-
-function pollPayload(round, hashes) {
-  const bw = bio.write(8 + 9 + hashes.length * 36);
-  bw.writeU64(round);
-  bw.writeVarint(hashes.length);
-  for (const h of hashes) {
-    bw.writeU32(MSG_BLOCK);
-    bw.writeBytes(h);
-  }
-  return bw.slice();
-}
-
-function readResponse(data) {
-  const br = bio.read(data);
-  const round = br.readBytes(8).toString('hex');
-  const cooldown = br.readU32();
-  const votes = [];
-  const n = br.readVarint();
-  for (let i = 0; i < n; i++)
-    votes.push({error: br.readU32(), hash: br.readHash('hex')});
-  return {round, cooldown, votes};
 }
 
 /*
@@ -132,11 +101,16 @@ function waitFor(peer, test, ms = TIMEOUT) {
 const payloadOf = cmd => p => p.cmd === cmd ? p.data : undefined;
 
 // Staking nodes often run without NODE_NETWORK; Avalanche does not need it.
-function createPeer() {
+function createPeer(onNonce = () => {}) {
   const peer = Peer.fromOptions({
     network,
     agent: '/bcash-avalanche-probe:0.0.1/',
     hasNonce: () => false,
+    createNonce: () => {
+      const nonce = random.randomBytes(8);
+      onNonce(nonce);
+      return nonce;
+    },
     requireNetwork: false
   });
   peer.on('error', () => {});
@@ -151,7 +125,16 @@ function timeout(ms) {
 
 async function probe(host) {
   const result = {host, reached: false};
-  const peer = createPeer();
+  let ourNonce = null;
+  const peer = createPeer((nonce) => {
+    ourNonce = nonce;
+  });
+
+  let version = null;
+  peer.on('packet', (p) => {
+    if (p.cmd === 'version')
+      version = p;
+  });
 
   // The node sends its avahello right after the handshake.
   const hello = waitFor(peer, payloadOf('avahello'));
@@ -171,12 +154,13 @@ async function probe(host) {
   result.services = peer.services;
   result.avalancheService = Boolean(peer.services & NODE_AVALANCHE);
 
-  peer.send(new packets.UnknownPacket('avahello', helloPayload()));
+  // Ours has no proof, so the node does not check its signature.
+  peer.send(new packets.UnknownPacket('avahello', new Hello().toRaw()));
 
   const theirs = await hello;
   if (theirs) {
     try {
-      result.delegation = readDelegation(bio.read(theirs));
+      result.delegation = readHello(theirs, version, ourNonce);
     } catch (e) {
       result.delegationError = e.message;
     }
@@ -187,14 +171,21 @@ async function probe(host) {
     // Quorum: genesis is active on every node, so a node with quorum
     // answers 0; one without answers -1.
     const genesis = Buffer.from(network.genesis.hash);
+    const poll = new Poll(1n, [new InvItem(invTypes.BLOCK, genesis)]);
     const resp = waitFor(peer, payloadOf('avaresponse'));
-    peer.send(new packets.UnknownPacket('avapoll', pollPayload(1, [genesis])));
+    peer.send(new packets.UnknownPacket('avapoll', poll.toRaw()));
     const raw = await resp;
     if (raw) {
-      const r = readResponse(raw);
+      const r = Response.fromRaw(raw);
       const v = r.votes[0] ? r.votes[0].error : null;
       result.genesisVote = v === VOTE_UNKNOWN ? -1 : v;
       result.quorum = v === 0;
+      // Signed by the session key the node's hello delegated to.
+      const d = result.delegation;
+      if (d && d.hasProof && d.valid) {
+        const key = d.hello.delegation.verify()[2];
+        result.responseSigned = r.verify(key);
+      }
     }
 
     // Avalanche peers it knows (ABC sends only Avalanche-enabled ones).
@@ -215,7 +206,7 @@ async function fetchProofs(host) {
   try {
     peer.connect(NetAddress.fromHostname(host, network));
     await peer.open();
-    peer.send(new packets.UnknownPacket('avahello', helloPayload()));
+    peer.send(new packets.UnknownPacket('avahello', new Hello().toRaw()));
 
     const compact = waitFor(peer, payloadOf('avaproofs'));
     peer.send(new packets.UnknownPacket('getavaproofs', Buffer.alloc(0)));
@@ -355,8 +346,9 @@ async function pool(items, size, fn) {
     perNode: all.map(r => ({host: r.host, reached: r.reached, agent: r.agent,
       height: r.height, avalanche: r.avalanche,
       ownProof: r.delegation ? r.delegation.hasProof : undefined,
-      delegation: r.delegation && r.delegation.hasProof
+      hello: r.delegation && r.delegation.hasProof
         ? r.delegation.reason : undefined,
+      responseSigned: r.responseSigned,
       genesisVote: r.genesisVote,
       avaAddrs: r.avaAddrs ? r.avaAddrs.length : undefined,
       error: r.error}))
