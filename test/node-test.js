@@ -36,7 +36,6 @@ const network = node.network;
 const {wdb} = node.require('walletdb');
 
 // May 15th hardfork update
-const PHONON = network.block.phononActivationTime;
 
 let wallet = null;
 let tip1 = null;
@@ -104,7 +103,6 @@ describe('Node', function() {
     miner.mempool = null;
     consensus.COINBASE_MATURITY = 0;
 
-    network.block.phononActivationTime = util.now() + 3600;
     await node.open();
   });
 
@@ -671,7 +669,6 @@ describe('Node', function() {
 
   it('should cleanup', async () => {
     consensus.COINBASE_MATURITY = 100;
-    network.block.phononActivationTime = PHONON;
     await node.close();
   });
 });
