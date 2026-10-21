@@ -171,6 +171,33 @@ suite(title, function() {
     await until(() => processor.avaproofsNodeCounter === 1);
   });
 
+  it('should report it as ABC\'s RPC does', async () => {
+    const rpc = async (method, params = []) => {
+      const json = await node.rpc.call({method, params}, {});
+      if (json.error)
+        throw new Error(`${method}: ${json.error.message}`);
+      return json.result;
+    };
+
+    const info = await rpc('getavalancheinfo');
+    // Quorum needs 8 nodes.
+    assert.strictEqual(info.ready_to_poll, false);
+    assert.strictEqual(info.network.proof_count, 1);
+    assert.strictEqual(info.network.connected_proof_count, 1);
+    assert.strictEqual(info.network.connected_node_count, 1);
+    assert.strictEqual(info.network.total_stake_amount,
+      proof.getStakedAmount() / 100);
+
+    // Matches what ABC says of its own proof.
+    const abcInfo = await abc.call('getavalancheinfo');
+    assert.strictEqual(info.network.total_stake_amount,
+      abcInfo.local.stake_amount);
+
+    const [peer] = await rpc('getavalanchepeerinfo', [proof.rid()]);
+    assert.strictEqual(peer.proof, proof.toHex());
+    assert.strictEqual(peer.nodecount, 1);
+  });
+
   it('should still be connected to it', async () => {
     const peers = await abc.call('getpeerinfo');
     assert.strictEqual(peers.length, 1);
