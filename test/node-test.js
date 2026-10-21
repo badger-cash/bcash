@@ -616,8 +616,10 @@ describe('Node', function() {
     assert.strictEqual(result.transactions.length, 2);
     assert.strictEqual(fees, tx1.getFee() + tx2.getFee());
     assert.strictEqual(size, tx1.getSize() + tx2.getSize());
-    assert.strictEqual(result.transactions[0].txid, tx1.txid());
-    assert.strictEqual(result.transactions[1].txid, tx2.txid());
+    // In canonical (txid) order, as eCash orders a block's transactions,
+    // not the order they were made in.
+    const txids = [tx1.txid(), tx2.txid()].sort();
+    assert.deepStrictEqual(result.transactions.map(t => t.txid), txids);
     assert.strictEqual(result.coinbasevalue, 125e7 + fees);
   });
 
