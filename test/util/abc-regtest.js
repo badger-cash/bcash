@@ -16,11 +16,18 @@ const random = require('bcrypto/lib/random');
 const BITCOIND = process.env.BITCOIN_ABC_BITCOIND || null;
 
 class ABCRegtest {
-  constructor(args = []) {
+  /**
+   * @param {String[]} [args] - More bitcoind arguments.
+   * @param {Object} [options]
+   * @param {Boolean} [options.p2p] - Listen for peers on 127.0.0.1.
+   */
+
+  constructor(args = [], options = {}) {
     assert(BITCOIND, 'BITCOIN_ABC_BITCOIND is not set.');
     this.args = args;
     this.dir = null;
     this.port = 20000 + (random.randomInt() % 20000);
+    this.p2pPort = options.p2p ? this.port + 1 : null;
     this.auth = 'abc:' + random.randomBytes(16).toString('hex');
     this.proc = null;
     this.log = '';
@@ -30,23 +37,35 @@ class ABCRegtest {
     return BITCOIND != null && fs.existsSync(BITCOIND);
   }
 
-  async open() {
-    this.dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bcash-abc-'));
+  get p2pHost() {
+    assert(this.p2pPort, 'Not listening for peers.');
+    return `127.0.0.1:${this.p2pPort}`;
+  }
+
+  async open(more = []) {
+    if (!this.dir)
+      this.dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bcash-abc-'));
 
     const [user, password] = this.auth.split(':');
 
+    const listen = this.p2pPort
+      ? ['-listen=1', `-bind=127.0.0.1:${this.p2pPort}`]
+      : ['-listen=0'];
+
+    this.log = '';
     this.proc = spawn(BITCOIND, [
       '-regtest',
       `-datadir=${this.dir}`,
       '-server=1',
-      '-listen=0',
+      ...listen,
       '-dnsseed=0',
       '-fixedseeds=0',
       `-rpcport=${this.port}`,
       `-rpcuser=${user}`,
       `-rpcpassword=${password}`,
       '-printtoconsole=1',
-      ...this.args
+      ...this.args,
+      ...more
     ]);
 
     this.proc.stdout.on('data', (data) => {
@@ -72,15 +91,31 @@ class ABCRegtest {
     throw new Error('bitcoind did not start.');
   }
 
-  async close() {
+  async stop() {
     if (this.proc && this.proc.exitCode == null) {
       const exited = new Promise(r => this.proc.once('exit', r));
       this.proc.kill('SIGINT');
       await exited;
     }
+  }
+
+  /**
+   * Restart on the same chain, with more arguments.
+   * @param {String[]} more
+   */
+
+  async restart(more) {
+    await this.stop();
+    await this.open(more);
+  }
+
+  async close() {
+    await this.stop();
 
     if (this.dir)
       fs.rmSync(this.dir, {recursive: true, force: true});
+
+    this.dir = null;
   }
 
   call(method, ...params) {
