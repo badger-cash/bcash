@@ -51,6 +51,22 @@ describe('Peer version', function() {
     assert.strictEqual(peer.services, 0);
   });
 
+  // Pool peers take the pool's options, which have no requireNetwork.
+  it('drops it when the options do not mention NODE_NETWORK', async () => {
+    const options = {...outbound().options, requireNetwork: undefined};
+    const peer = new Peer(options);
+    peer.outbound = true;
+    peer.send = () => {};
+    await assert.rejects(peer.handleVersion(version(0)),
+      /does not support network services/);
+  });
+
+  it('keeps it when the pool clears requireNetwork on the peer', async () => {
+    const peer = outbound();
+    peer.requireNetwork = false;
+    await peer.handleVersion(version(0));
+  });
+
   it('still accepts an outbound peer with NODE_NETWORK', async () => {
     await outbound().handleVersion(version(common.services.NETWORK));
   });
