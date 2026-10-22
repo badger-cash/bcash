@@ -214,5 +214,85 @@ describe('Pool avalanche quorum', function() {
     full.avalanche.hasConnectedRatio = () => true;
     assert.strictEqual(full.avalancheOutboundLimit(), 150);
   });
+
+  // Stakers {score, nodes: [ids]}; connections with no node: ids too.
+  function trimmer(stakers, others, limit, busy = []) {
+    const nodes = new Map();
+    const peers = new Map();
+    let total = 0;
+    stakers.forEach((st, i) => {
+      const staker = {peerId: i, nodeCount: st.nodes.length,
+        proof: {getScore: () => st.score}};
+      peers.set(i, staker);
+      total += st.score;
+      for (const id of st.nodes) {
+        nodes.set(id, {nodeId: id, peerId: i,
+          nextRequestTime: busy.includes(id) ? 10 : 0});
+      }
+    });
+
+    const conns = [...nodes.keys(), ...others].map(id => ({
+      id, avalancheOutbound: true, closed: false,
+      hostname: () => `10.0.0.${id}:8333`,
+      destroy() {
+        this.closed = true;
+      }
+    }));
+    conns.forEach((c, i) => (c.next = conns[i + 1] || null));
+
+    const p = {
+      options: {spv: true},
+      logger: {debug() {}},
+      trimmed: new Set(),
+      peers: {avalanche: conns.length, head: () => conns[0]},
+      avalancheOutboundLimit: () => limit,
+      avalanche: {
+        minQuorumConnectedScoreRatio: 0.8,
+        peerManager: {
+          ms: () => 5,
+          getNode: id => nodes.get(id) || null,
+          peers,
+          getTotalPeersScore: () => total,
+          getConnectedPeersScore: () => total
+        }
+      }
+    };
+    Pool.prototype.trimAvalancheOutbound.call(p);
+    return {closed: conns.filter(c => c.closed).map(c => c.id).sort(),
+      trimmed: p.trimmed};
+  }
+
+  it('should close avalanche nodes past the SPV few, least stake first', () => {
+    const stakers = [
+      {score: 60, nodes: [1]},
+      {score: 20, nodes: [2, 3]},
+      {score: 10, nodes: [4]},
+      {score: 5, nodes: [5]},
+      {score: 5, nodes: [6]}
+    ];
+
+    // No node first, then a staker's extra, then the least staked.
+    const {closed, trimmed} = trimmer(stakers, [7, 8], 3);
+    assert.deepStrictEqual(closed, [2, 5, 6, 7, 8]);
+    assert(trimmed.has('10.0.0.7:8333'));
+
+    // Down to the connected ratio, 80 of 100, not below.
+    assert.deepStrictEqual(trimmer(stakers, [], 1).closed, [2, 4, 5, 6]);
+
+    // Not a node with a poll out.
+    assert.deepStrictEqual(trimmer(stakers, [], 4, [5]).closed, [2, 6]);
+
+    // Nothing past the limit.
+    assert.deepStrictEqual(trimmer(stakers, [7], 7).closed, []);
+  });
+
+  it('should not dial a trimmed avalanche node again', async () => {
+    const p = await pool(true);
+    const a = addr('10.0.0.9', NETWORK | AVALANCHE);
+    p.hosts.add(a);
+    assert.strictEqual(p.getAvalancheHost().hostname, a.hostname);
+    p.trimmed.add(a.hostname);
+    assert.strictEqual(p.getAvalancheHost(), null);
+  });
 });
 
