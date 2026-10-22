@@ -218,7 +218,7 @@ describe('Address', function() {
 
     assert.strictEqual(
       err.message,
-      'Invalid checksum: ecash:pruptxcdmxamme0f725q485w3vk0yxkh6grnr209aq.'
+      'Invalid cashaddr checksum.'
     );
   });
 
@@ -236,7 +236,7 @@ describe('Address', function() {
 
     assert.strictEqual(
       err.message,
-      'Invalid address type in version byte: 16.'
+      'Not a valid address type.'
     );
   });
 
@@ -254,7 +254,7 @@ describe('Address', function() {
 
     assert.strictEqual(
       err.message,
-      'Invalid hash size: bitcoincash:qpg4nt2nwm9mm2a6s6gmcmjx2yr7c9kvta.'
+      'Invalid cashaddr data length.'
     );
   });
 
@@ -273,7 +273,7 @@ describe('Address', function() {
     assert(err, 'Exception error missing.');
     assert.strictEqual(
       err.message,
-      'Invalid address: ecash:Pruptxcdmxamme0f725q485w3vk0yxkh6grnr209ag.'
+      'Invalid cashaddr casing.'
     );
   });
 
@@ -292,7 +292,7 @@ describe('Address', function() {
     assert(err, 'Exception error missing.');
     assert.strictEqual(
       err.message,
-      'Input cannot be converted to 8 bits without padding, but strict mode was used.'
+      'Invalid padding in data.'
     );
   });
 
@@ -311,7 +311,7 @@ describe('Address', function() {
     assert(err, 'Exception error missing.');
     assert.strictEqual(
       err.message,
-      'Input cannot be converted to 8 bits without padding, but strict mode was used.'
+      'Non zero padding.'
     );
   });
 });
