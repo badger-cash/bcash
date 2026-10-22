@@ -114,6 +114,32 @@ describe('Pool avalanche addresses', function() {
     assert.strictEqual(typeof p.avalanche.discourage, 'function');
   });
 
+  it('should dial a few avalanche nodes at a time', async () => {
+    const p = await pool(true);
+    delete p.fillOutbound;
+    p.addLoader = () => {};
+    p.addOutbound = () => {};
+    let dials = 0;
+    let refills = 0;
+    p.addAvalancheOutbound = () => {
+      dials += 1;
+    };
+    p.refill = () => {
+      refills += 1;
+    };
+
+    // Eight of the 150 slots, then none until a refill.
+    p.fillOutbound();
+    assert.strictEqual(dials, 8);
+    p.fillOutbound();
+    assert.strictEqual(dials, 8);
+    assert.strictEqual(refills, 1);
+
+    p.lastAvalancheDials -= 3000;
+    p.fillOutbound();
+    assert.strictEqual(dials, 16);
+  });
+
   it('should drop them without avalanche', async () => {
     const p = await pool(false);
     await p.handleAddr(fakePeer, new packets.AddrPacket([
