@@ -162,14 +162,41 @@ describe('Address', function() {
 
     assert.strictEqual(
       addr.toString('testnet'),
-      'xectest:przhjdpv93xfygpqtckdc2zkzuzqeyj2pgnhhvzu9r'
+      'ectest:przhjdpv93xfygpqtckdc2zkzuzqeyj2pgwjf6pe4d'
     );
+  });
+
+  it('should match Bitcoin ABC regtest addresses', () => {
+    // The miner fund, as Bitcoin ABC's regtest decodescript gives it.
+    const raw = 'd37c4c809fe9840e7bfa77b86bd47163f6fb6c60';
+    const addr = Address.fromScripthash(Buffer.from(raw, 'hex'));
+    const cashaddr = 'ecregtest:prfhcnyqnl5cgrnmlfmms675w93ld7mvvq9jcw0zsn';
+
+    assert.strictEqual(addr.toString('regtest'), cashaddr);
+    assert.strictEqual(
+      Address.fromString(cashaddr, 'regtest').getHash('hex'), raw);
+
+    // Base58, as testnet's.
+    assert.strictEqual(addr.toBase58('regtest'), addr.toBase58('testnet'));
+  });
+
+  it('should reject the old testnet and regtest prefixes', () => {
+    const raw = 'c579342c2c4c9220205e2cdc285617040c924a0a';
+    const addr = Address.fromScripthash(Buffer.from(raw, 'hex'));
+    const {cashaddr} = require('bstring');
+
+    for (const [prefix, network] of [['xectest', 'testnet'],
+      ['xecreg', 'regtest']]) {
+      const old = cashaddr.encode(prefix, 1, addr.getHash());
+      assert.throws(() => Address.fromCashAddr(old, network),
+        /Network mismatch/);
+    }
   });
 
   it('should match p2sh address without prefix', () => {
     const raw = 'c579342c2c4c9220205e2cdc285617040c924a0a';
     const p2sh = Buffer.from(raw, 'hex');
-    const addrstr = 'przhjdpv93xfygpqtckdc2zkzuzqeyj2pgnhhvzu9r';
+    const addrstr = 'przhjdpv93xfygpqtckdc2zkzuzqeyj2pgwjf6pe4d';
     const addr = Address.fromString(addrstr, 'testnet');
 
     assert.strictEqual(addr.type, 1, 'Incorrect type.');
