@@ -90,3 +90,31 @@ describe('Pool avalanche messages', function() {
     assert.deepStrictEqual(handled, ['avaproof', 'avaresponse']);
   });
 });
+
+describe('Pool avalanche quorum', function() {
+  async function spvPool(options = {}) {
+    const network = Network.get('testnet');
+    const chain = new Chain({network, memory: true, spv: true});
+    await chain.open();
+    return new Pool({network, chain, spv: true, memory: true,
+      listen: false, avalanche: true, ...options});
+  }
+
+  it('should keep Bitcoin ABC\'s rule on a full node', async () => {
+    const {avalanche} = await pool(true);
+    assert.strictEqual(avalanche.minQuorumUnanimousScoreRatio,
+      avalanche.minQuorumConnectedScoreRatio);
+  });
+
+  it('should finalize unanimous votes with half the stake on SPV', async () => {
+    const {avalanche} = await spvPool();
+    assert.strictEqual(avalanche.minQuorumUnanimousScoreRatio, 0.5);
+    assert.strictEqual(avalanche.minQuorumConnectedScoreRatio, 0.8);
+  });
+
+  it('should take the ratio it is given', async () => {
+    const {avalanche} = await spvPool({avaMinQuorumUnanimousStakeRatio: 0.8});
+    assert.strictEqual(avalanche.minQuorumUnanimousScoreRatio, 0.8);
+  });
+});
+
