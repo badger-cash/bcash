@@ -1170,6 +1170,17 @@ describe('Avalanche voting on blocks', function() {
     assert(processor.isAccepted(BLOCK, block.hash));
   });
 
+  it('should not poll new tips while syncing', async () => {
+    const block = setup.chain.mine();
+
+    processor.isIBD = () => true;
+    await processor.updatedBlockTip(block);
+    processor.isIBD = () => false;
+
+    assert.strictEqual(setup.getInvsForNextPoll().length, 0);
+    assert(!processor.isPolled(BLOCK, block.hash));
+  });
+
   it('should tell the chain what polls decide', async () => {
     const block = setup.chain.mine();
     const nodes = await setup.connectNodes();
