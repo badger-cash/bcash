@@ -14,6 +14,7 @@ const assert = require('bsert');
 const {randomBytes} = require('crypto');
 const {BloomFilter} = require('bfilter');
 const Chain = require('../lib/blockchain/chain');
+const NetAddress = require('../lib/net/netaddress');
 const Pool = require('../lib/net/pool');
 const Peer = require('../lib/net/peer');
 const packets = require('../lib/net/packets');
@@ -244,6 +245,27 @@ describe('Pool#directHosts', function() {
     const hosts = await pool.directHosts();
     assert.deepStrictEqual(hosts.map(a => a.hostname),
       ['10.0.0.1:18444', '10.0.0.2:18444']);
+  });
+
+  it('asks the seeds again when a lookup comes back empty', async () => {
+    this.timeout(10000);
+    const chain = new Chain({network, memory: true, spv: true});
+    const pool = new Pool({network, chain, spv: true, memory: true,
+      listen: false});
+
+    // The first lookup fails, the second answers.
+    let lookups = 0;
+    pool.hosts.dnsSeeds = ['seed.example'];
+    pool.hosts.populate = async () => {
+      lookups += 1;
+      return lookups < 2
+        ? []
+        : [NetAddress.fromHostname('10.0.0.3:18444', network)];
+    };
+
+    const hosts = await pool.directHosts();
+    assert.strictEqual(lookups, 2);
+    assert.deepStrictEqual(hosts.map(a => a.hostname), ['10.0.0.3:18444']);
   });
 });
 
