@@ -214,6 +214,65 @@ describe('Avalanche Processor', function() {
     assert(processor.alreadyHaveProof(bad.id()));
   });
 
+  // Bitcoin ABC checks a proof at once. An SPV node fetches its coins:
+  // the same proof can arrive again meanwhile, from every node that
+  // announced it, and only the first is checked.
+  it('should check a proof once, banning only its first sender', async () => {
+    const a = await connect(new FakePeer(1));
+    const b = await connect(new FakePeer(2));
+    const proof = stakingProof();
+
+    let release;
+    const gate = new Promise((r) => {
+      release = r;
+    });
+    pm.verifier.verify = async () => {
+      await gate;
+      return [false, 'expired-proof'];
+    };
+
+    const first = processor.handlePacket(a, unknown('avaproof',
+      proof.toRaw()));
+
+    // Announced and sent again while it is checked: not fetched, nor
+    // held against the sender.
+    processor.handleProofInv(b, [proof.id()]);
+    assert.strictEqual(b.last('getdata'), null);
+    await processor.handlePacket(b, unknown('avaproof', proof.toRaw()));
+
+    release();
+    await first;
+
+    assert.strictEqual(a.ban, 100);
+    assert.strictEqual(b.ban, 0);
+    assert(processor.alreadyHaveProof(proof.id()));
+  });
+
+  // Bitcoin ABC's too-many-invalid-avaproofs.
+  it('should limit proofs that fail without being invalid', async () => {
+    const peer = await connect(new FakePeer(1));
+    pm.verifier.verify = async () => [false, 'utxo-missing-or-spent'];
+
+    const max = Processor.MAX_INVALID_AVAPROOFS;
+    for (let i = 0; i < max - 1; i++) {
+      await processor.handlePacket(peer, unknown('avaproof',
+        stakingProof().toRaw()));
+    }
+    assert.strictEqual(peer.ban, 0);
+
+    // An hour on, the earlier ones no longer count.
+    now += Processor.INVALID_AVAPROOFS_INTERVAL;
+    await processor.handlePacket(peer, unknown('avaproof',
+      stakingProof().toRaw()));
+    assert.strictEqual(peer.ban, 0);
+
+    for (let i = 0; i < max - 1; i++) {
+      await processor.handlePacket(peer, unknown('avaproof',
+        stakingProof().toRaw()));
+    }
+    assert.strictEqual(peer.ban, 100);
+  });
+
   it('should hold proofs during IBD', async () => {
     ibd = true;
     const peer = await connect(new FakePeer(1));
