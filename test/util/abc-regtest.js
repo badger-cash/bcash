@@ -12,6 +12,14 @@ const http = require('http');
 const os = require('os');
 const path = require('path');
 const random = require('bcrypto/lib/random');
+const hash160 = require('bcrypto/lib/hash160');
+const secp256k1 = require('bcrypto/lib/secp256k1');
+const KeyRing = require('../../lib/primitives/keyring');
+const Outpoint = require('../../lib/primitives/outpoint');
+const Script = require('../../lib/script/script');
+const util = require('../../lib/utils/util');
+const Proof = require('../../lib/avalanche/proof');
+const {Stake} = require('../../lib/avalanche/stake');
 
 const BITCOIND = process.env.BITCOIN_ABC_BITCOIND || null;
 
@@ -118,6 +126,71 @@ class ABCRegtest {
     this.dir = null;
   }
 
+  /**
+   * Make this node stake: mine coinbases to a stake key, build a proof
+   * of two of them with bcash, and restart with it. Pass the node
+   * -avaproofstakeutxoconfirmations=1 and a low dust threshold.
+   * @returns {Promise} - Returns {proof, masterKey, stakeKey, descriptor}.
+   */
+
+  async stake() {
+    const pub = key => secp256k1.publicKeyCreate(key, true);
+    // ABC's regtest keys use testnet's prefix; bcash's regtest has bcoin's.
+    const wif = key => KeyRing.fromPrivate(key).toSecret('testnet');
+
+    const masterKey = secp256k1.privateKeyGenerate();
+    const stakeKey = secp256k1.privateKeyGenerate();
+
+    const desc = `pkh(${pub(stakeKey).toString('hex')})`;
+    const {descriptor} = await this.call('getdescriptorinfo', desc);
+    const hashes = await this.call('generatetodescriptor', 10, descriptor);
+
+    const stakes = [];
+    for (const hash of hashes.slice(0, 2)) {
+      const block = await this.call('getblock', hash, 2);
+      const tx = block.tx[0];
+      const stake = new Stake({
+        outpoint: new Outpoint(util.fromRev(tx.txid), 0),
+        // RPC amounts are in XEC, 100 satoshis each.
+        amount: Math.round(tx.vout[0].value * 100),
+        height: block.height,
+        coinbase: true,
+        pubkey: pub(stakeKey)
+      });
+      stakes.push({stake, key: stakeKey});
+    }
+
+    const proof = Proof.build({
+      sequence: 1n,
+      expiration: 0n,
+      masterKey,
+      payout: Script.fromPubkeyhash(hash160.digest(pub(masterKey))),
+      stakes
+    });
+
+    await this.restart([
+      `-avaproof=${proof.toHex()}`,
+      `-avamasterkey=${wif(masterKey)}`
+    ]);
+
+    return {proof, masterKey, stakeKey, descriptor};
+  }
+
+  /**
+   * Have the node register and share its own proof: it does at a new tip
+   * once a node is connected to it.
+   * @param {String} descriptor
+   * @returns {Promise}
+   */
+
+  async shareProof(descriptor) {
+    await this.call('generatetodescriptor', 1, descriptor);
+    await until(async () => {
+      const info = await this.call('getavalancheinfo');
+      return info.local.verified;
+    });
+  }
+
   call(method, ...params) {
     const body = JSON.stringify({jsonrpc: '1.0', id: 0, method, params});
 
@@ -155,5 +228,16 @@ class ABCRegtest {
     });
   }
 }
+
+async function until(test, ms = 30000) {
+  const start = Date.now();
+  while (!await test()) {
+    if (Date.now() - start > ms)
+      throw new Error('Timed out.');
+    await new Promise(r => setTimeout(r, 100));
+  }
+}
+
+ABCRegtest.until = until;
 
 module.exports = ABCRegtest;

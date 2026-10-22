@@ -11,33 +11,14 @@
  */
 
 const assert = require('bsert');
-const hash160 = require('bcrypto/lib/hash160');
-const secp256k1 = require('bcrypto/lib/secp256k1');
 const FullNode = require('../lib/node/fullnode');
-const KeyRing = require('../lib/primitives/keyring');
-const Outpoint = require('../lib/primitives/outpoint');
-const Script = require('../lib/script/script');
-const util = require('../lib/utils/util');
-const Proof = require('../lib/avalanche/proof');
 const Processor = require('../lib/avalanche/processor');
-const {Stake} = require('../lib/avalanche/stake');
 const ABCRegtest = require('./util/abc-regtest');
+
+const {until} = ABCRegtest;
 
 // Satoshis; regtest coinbases are below the mainnet threshold.
 const DUST_THRESHOLD = 1000000;
-
-// ABC's regtest keys use testnet's prefix; bcash's regtest has bcoin's.
-const wif = key => KeyRing.fromPrivate(key).toSecret('testnet');
-const pub = key => secp256k1.publicKeyCreate(key, true);
-
-async function until(test, ms = 30000) {
-  const start = Date.now();
-  while (!await test()) {
-    if (Date.now() - start > ms)
-      throw new Error('Timed out.');
-    await new Promise(r => setTimeout(r, 100));
-  }
-}
 
 const available = ABCRegtest.available();
 const suite = available ? describe : describe.skip;
@@ -52,48 +33,15 @@ suite(title, function() {
     '-avaproofstakeutxoconfirmations=1'
   ], {p2p: true}) : null;
 
-  const masterKey = secp256k1.privateKeyGenerate();
-  const stakeKey = secp256k1.privateKeyGenerate();
-
   let node = null;
   let proof = null;
+  let descriptor = null;
 
   before(async () => {
     await abc.open();
 
-    const desc = `pkh(${pub(stakeKey).toString('hex')})`;
-    const {descriptor} = await abc.call('getdescriptorinfo', desc);
-    const hashes = await abc.call('generatetodescriptor', 10, descriptor);
-
-    const stakes = [];
-    for (const hash of hashes.slice(0, 2)) {
-      const block = await abc.call('getblock', hash, 2);
-      const tx = block.tx[0];
-      const stake = new Stake({
-        outpoint: new Outpoint(util.fromRev(tx.txid), 0),
-        amount: Math.round(tx.vout[0].value * 100),
-        height: block.height,
-        coinbase: true,
-        pubkey: pub(stakeKey)
-      });
-      stakes.push({stake, key: stakeKey});
-    }
-
-    proof = Proof.build({
-      sequence: 1n,
-      expiration: 0n,
-      masterKey,
-      payout: Script.fromPubkeyhash(hash160.digest(pub(masterKey))),
-      stakes
-    });
-
-    // ABC stakes the proof bcash built.
-    await abc.restart([
-      `-avaproof=${proof.toHex()}`,
-      `-avamasterkey=${wif(masterKey)}`
-    ]);
-
-    // Its proof registers at a new tip.
+    // ABC stakes a proof bcash built; it registers at a new tip.
+    ({proof, descriptor} = await abc.stake());
     await abc.call('generatetodescriptor', 1, descriptor);
 
     node = new FullNode({
@@ -137,13 +85,7 @@ suite(title, function() {
 
     // ABC shares its own proof once it is registered: at a new tip, with
     // a node connected...
-    const {descriptor} = await abc.call('getdescriptorinfo',
-      `pkh(${pub(stakeKey).toString('hex')})`);
-    await abc.call('generatetodescriptor', 1, descriptor);
-    await until(async () => {
-      const info = await abc.call('getavalancheinfo');
-      return info.local.verified;
-    });
+    await abc.shareProof(descriptor);
 
     // ...and answers getavaproofs once a minute.
     let time = Math.floor(Date.now() / 1000);
