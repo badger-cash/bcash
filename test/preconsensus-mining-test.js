@@ -117,4 +117,35 @@ describe('Pre-consensus mining', function() {
     assert(chain.tip.hash.equals(tip.hash));
     assert(chain.isParked(block.hash()));
   });
+
+  it('should answer the pre-consensus RPCs, as Bitcoin ABC', async () => {
+    const call = async (method, params = []) => {
+      const json = await node.rpc.call({method, params}, {});
+      assert.strictEqual(json.error, null, JSON.stringify(json.error));
+      return json.result;
+    };
+
+    // A quorum to answer, as polls would need.
+    pool.avalanche.isQuorumEstablished = () => true;
+
+    const tx = spend(coins[2], 10000);
+    await mempool.addTX(tx);
+    assert.strictEqual(await call('isfinaltransaction', [tx.txid()]), false);
+
+    // Finalized by hand, with its ancestors (none unconfirmed).
+    assert.deepStrictEqual(await call('finalizetransaction', [tx.txid()]),
+      [tx.txid()]);
+    assert.strictEqual(await call('isfinaltransaction', [tx.txid()]), true);
+    assert((await call('getfinaltransactions')).includes(tx.txid()));
+
+    const info = await call('getmempoolinfo');
+    assert.strictEqual(info.finalized_txs_size, mempool.finalized.size);
+    assert(info.finalized_txs_bytes >= tx.getSize());
+
+    // Removed, finalized or not.
+    await call('removetransaction', [tx.txid()]);
+    assert(!mempool.hasEntry(tx.hash()));
+    assert(!mempool.isAvalancheFinalized(tx.hash()));
+  });
 });
+
