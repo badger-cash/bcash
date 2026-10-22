@@ -60,6 +60,8 @@ function mineBlock(txs) {
 function fakePeer() {
   return {
     blockMap: new BufferMap(),
+    blockSizes: [],
+    sendsFullBlocks: false,
     destroyed: false,
     ban: 0,
     hostname: () => '10.0.0.1:18444',
@@ -112,8 +114,10 @@ describe('Pool SPV full blocks', function() {
     assert(merkle.verify());
     assert.deepStrictEqual(merkle.txs.map(t => t.txid()), [mine.txid()]);
 
-    // The window is sized for the full block, not the merkleblock.
-    assert.strictEqual(pool.blockSizeEstimate(), block.getSize());
+    // Its share is sized for the full block, not the merkleblock, and it
+    // is known to send full blocks.
+    assert.strictEqual(pool.blockSizeEstimate(peer), block.getSize());
+    assert.strictEqual(peer.sendsFullBlocks, true);
   });
 
   it('should still drop a peer for a block not asked for', async () => {
