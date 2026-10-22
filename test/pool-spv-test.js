@@ -16,6 +16,7 @@ const Chain = require('../lib/blockchain/chain');
 const Pool = require('../lib/net/pool');
 const Block = require('../lib/primitives/block');
 const Network = require('../lib/protocol/network');
+const Outpoint = require('../lib/primitives/outpoint');
 
 const network = Network.get('regtest');
 
@@ -67,4 +68,31 @@ describe('Pool (SPV)', function() {
 
     assert.strictEqual(chain.height, height);
   });
+
+  it('adds a watched item to loaded filters alone', async () => {
+    // One peer with the filter loaded, one still opening.
+    const sent = [[], []];
+    const loaded = {spvFilterLoaded: true, send: p => sent[0].push(p)};
+    const opening = {spvFilterLoaded: false, send: p => sent[1].push(p)};
+    loaded.next = opening;
+    opening.next = null;
+
+    const head = pool.peers.head;
+    pool.peers.head = () => loaded;
+    try {
+      const outpoint = new Outpoint(Buffer.alloc(32, 1), 0);
+      pool.watchOutpoint(outpoint);
+
+      assert.deepStrictEqual(sent[0].map(p => p.cmd), ['filteradd']);
+      assert.bufferEqual(sent[0][0].data, outpoint.toRaw());
+      assert.strictEqual(sent[1].length, 0);
+      assert(pool.spvFilter.test(outpoint.toRaw()));
+
+      // No resend of the whole filter.
+      assert.strictEqual(pool.pendingFilter, null);
+    } finally {
+      pool.peers.head = head;
+    }
+  });
 });
+
