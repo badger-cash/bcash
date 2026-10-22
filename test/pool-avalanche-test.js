@@ -246,7 +246,7 @@ describe('Pool avalanche quorum', function() {
   });
 
   // Stakers {score, nodes: [ids]}; connections with no node: ids too.
-  function trimmer(stakers, others, limit, busy = []) {
+  function trimmer(stakers, others, limit, busy = [], share = 1) {
     const nodes = new Map();
     const peers = new Map();
     let total = 0;
@@ -283,7 +283,7 @@ describe('Pool avalanche quorum', function() {
           getNode: id => nodes.get(id) || null,
           peers,
           getTotalPeersScore: () => total,
-          getConnectedPeersScore: () => total
+          getConnectedPeersScore: () => Math.round(total * share)
         }
       }
     };
@@ -314,6 +314,10 @@ describe('Pool avalanche quorum', function() {
 
     // Nothing past the limit.
     assert.deepStrictEqual(trimmer(stakers, [7], 7).closed, []);
+
+    // Between the ratio and the margin, those that cost no stake still go.
+    assert.deepStrictEqual(trimmer(stakers, [7, 8], 1, [], 0.82).closed,
+      [2, 7, 8]);
   });
 
   it('should not dial a trimmed avalanche node again', async () => {
