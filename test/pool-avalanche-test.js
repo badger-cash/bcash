@@ -61,6 +61,33 @@ describe('Pool avalanche addresses', function() {
     assert.strictEqual(p.getHost(), null);
   });
 
+  it('should take the nodes a getavaaddr answer lists', async () => {
+    const p = await pool(true);
+    const peer = {...fakePeer, id: 7};
+
+    // Bitcoin ABC lists avalanche nodes with no services.
+    p.avalanche.peers.set(peer.id, {peer, avaAddrsRequested: 0});
+    p.avalanche.send = () => {};
+    p.avalanche.requestAvaAddrs(p.avalanche.peers.get(peer.id));
+
+    const listening = addr('51.255.199.24', 0);
+    const natted = NetAddress.fromHostname('51.255.199.25:51234', 'testnet');
+    natted.services = 0;
+    natted.time = listening.time;
+    await p.handleAddr(peer, new packets.AddrPacket([listening, natted]));
+
+    // The one on the default port, as an avalanche node.
+    assert(p.hosts.map.has('51.255.199.24:18333'));
+    assert(!p.hosts.map.has('51.255.199.25:51234'));
+    assert.strictEqual(p.getAvalancheHost().hostname, '51.255.199.24:18333');
+
+    // An addr not answering one lists nothing of the kind.
+    await p.handleAddr(peer, new packets.AddrPacket([
+      addr('51.255.199.26', 0)
+    ]));
+    assert(!p.hosts.map.has('51.255.199.26:18333'));
+  });
+
   it('should discourage, not ban, as Bitcoin ABC', async () => {
     const p = await pool(true);
     await p.handleAddr(fakePeer, new packets.AddrPacket([
