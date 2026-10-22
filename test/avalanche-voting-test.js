@@ -102,7 +102,8 @@ class Setup {
       ms: this.ms,
       // As Bitcoin ABC's AvalancheTestChain100Setup.
       minQuorumStake: 0,
-      minQuorumConnectedStakeRatio: 0,
+      minQuorumConnectedStakeRatio: options.minQuorumConnectedStakeRatio || 0,
+      minQuorumUnanimousStakeRatio: options.minQuorumUnanimousStakeRatio,
       minAvaproofsNodeCount: 0,
       queryTimeout: options.queryTimeout,
       staleVoteThreshold: options.staleVoteThreshold,
@@ -1464,3 +1465,105 @@ describe('Avalanche vote map order', function() {
     }
   });
 });
+
+// Not in Bitcoin ABC: below the connected ratio, a unanimous vote is
+// final; a dissent waits for the ratio.
+describe('Avalanche unanimous votes below the connected ratio', function() {
+  const {BLOCK} = itemTypes;
+  let setup, processor;
+
+  beforeEach(() => {
+    setup = new Setup({
+      minQuorumConnectedStakeRatio: 0.8,
+      minQuorumUnanimousStakeRatio: 0.5
+    });
+    processor = setup.processor;
+  });
+
+  // Stakers with three nodes each, and stakers we have no node for.
+  async function stakers(withNodes, without) {
+    const nodes = [];
+    for (let i = 0; i < withNodes; i++)
+      nodes.push(await setup.connectNodes(3));
+    for (let i = 0; i < without; i++)
+      assert((await setup.pm.registerProof(setup.getProof()))[0]);
+    return nodes;
+  }
+
+  // Poll until a final update, or the rounds run out: each node votes
+  // as vote(nodeId) says.
+  async function poll(block, vote, rounds) {
+    for (let i = 0; i < rounds; i++) {
+      const round = setup.getRound();
+      await setup.runEventLoop();
+      if (setup.getRound() === round)
+        continue;
+      // The node it polled.
+      const query = [...processor.queries.values()]
+        .find(q => q.round === round);
+      const {nodeId} = query;
+      const r = await setup.registerVotes(nodeId,
+        new Response(round, 0, [new Vote(vote(nodeId), block.hash)]));
+      assert(r.ok);
+      const final = r.updates.find(u => u.status === voteStatus.FINALIZED);
+      if (final)
+        return final;
+    }
+    return null;
+  }
+
+  it('should poll with nodes for half the stake, not less', async () => {
+    // 2 of 5 stakers.
+    await stakers(2, 3);
+    assert(!processor.isQuorumEstablished());
+
+    // 3 of 5.
+    await setup.connectNodes(3);
+    assert(processor.isQuorumEstablished());
+    assert(!processor.hasConnectedRatio());
+  });
+
+  it('should finalize a unanimous vote with 60% of the stake', async () => {
+    await stakers(3, 2);
+    const block = setup.chain.mine();
+    assert(await processor.addToReconcile(BLOCK, block));
+
+    const final = await poll(block, () => 0, 20 * FINALIZATION_SCORE);
+    assert(final);
+    assert.bufferEqual(final.hash, block.hash);
+  });
+
+  it('should hold a vote with a dissent until 80% is connected', async () => {
+    const nodes = await stakers(3, 2);
+    const block = setup.chain.mine();
+    assert(await processor.addToReconcile(BLOCK, block));
+
+    // One node of one staker votes no, once.
+    const dissenter = nodes[2][0].id;
+    let dissented = false;
+    const vote = (nodeId) => {
+      if (nodeId === dissenter && !dissented) {
+        dissented = true;
+        return 1;
+      }
+      return 0;
+    };
+
+    assert.strictEqual(await poll(block, vote, 20 * FINALIZATION_SCORE),
+      null);
+    assert(dissented);
+    assert(processor.getConfidence(BLOCK, block.hash) >= FINALIZATION_SCORE);
+
+    // Nodes for the other stakers: now the vote stands.
+    for (const peer of setup.pm.peers.values()) {
+      if (peer.nodeCount === 0) {
+        const node = setup.connectNode();
+        assert(setup.pm.addNode(node.id, peer.proof.id(), MAX_ELEMENT_POLL));
+      }
+    }
+    assert(processor.hasConnectedRatio());
+
+    assert(await poll(block, () => 0, 100));
+  });
+});
+

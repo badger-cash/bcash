@@ -382,7 +382,9 @@ describe('Avalanche Processor', function() {
   });
 
   it('should need nodes for enough of the stake', async () => {
+    // Bitcoin ABC's rule alone.
     processor.minQuorumConnectedScoreRatio = 0.9;
+    processor.minQuorumUnanimousScoreRatio = 0.9;
 
     for (let i = 0; i < 8; i++) {
       const peer = await connect(new FakePeer(i + 1));
