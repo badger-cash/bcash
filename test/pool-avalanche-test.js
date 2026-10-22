@@ -276,8 +276,8 @@ describe('Pool avalanche quorum', function() {
     assert.deepStrictEqual(closed, [2, 5, 6, 7, 8]);
     assert(trimmed.has('10.0.0.7:8333'));
 
-    // Down to the connected ratio, 80 of 100, not below.
-    assert.deepStrictEqual(trimmer(stakers, [], 1).closed, [2, 4, 5, 6]);
+    // Down to 5% over the connected ratio, 85 of 100, not below.
+    assert.deepStrictEqual(trimmer(stakers, [], 1).closed, [2, 5, 6]);
 
     // Not a node with a poll out.
     assert.deepStrictEqual(trimmer(stakers, [], 4, [5]).closed, [2, 6]);
