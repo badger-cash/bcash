@@ -2010,4 +2010,35 @@ describe('Avalanche PeerManager', function() {
     assert(!pm.isDangling(lowSeq.id()));
     assert(!pm.exists(lowSeq.id()));
   });
+
+  it('should not hold the lock while a proof is checked', async () => {
+    const {chain, pm} = setup();
+    const registered = buildRandomProof(chain, MIN_VALID_PROOF_SCORE);
+    assert(await registerAndGetPeerId(pm, registered) !== NO_PEER);
+
+    // A proof whose coins take a while to fetch, as on an SPV node.
+    const slow = buildRandomProof(chain, MIN_VALID_PROOF_SCORE);
+    const verify = pm.verifier.verify.bind(pm.verifier);
+    let release;
+    const gate = new Promise((r) => {
+      release = r;
+    });
+    pm.verifier.verify = async (proof) => {
+      if (proof.id().equals(slow.id()))
+        await gate;
+      return verify(proof);
+    };
+
+    const pending = pm.registerProof(slow);
+
+    // Tips and rejections go on meanwhile.
+    await pm.updatedBlockTip();
+    assert(await pm.rejectProof(registered.id(), INVALIDATE));
+
+    release();
+    const [ok] = await pending;
+    assert(ok);
+    assert(pm.isBoundToPeer(slow.id()));
+  });
 });
+

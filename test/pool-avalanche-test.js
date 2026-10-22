@@ -69,3 +69,24 @@ describe('Pool avalanche addresses', function() {
     assert(!p.hosts.map.has('51.255.199.24:18333'));
   });
 });
+
+describe('Pool avalanche messages', function() {
+  it('should not hold a peer while a proof is checked', async () => {
+    const p = await pool(true);
+    const handled = [];
+
+    // A proof whose coins are never fetched.
+    p.avalanche.handlePacket = async (peer, packet) => {
+      handled.push(packet.cmd);
+      if (packet.cmd === 'avaproof')
+        await new Promise(() => {});
+    };
+
+    await p.handleUnknown(fakePeer,
+      new packets.UnknownPacket('avaproof', Buffer.alloc(0)));
+    await p.handleUnknown(fakePeer,
+      new packets.UnknownPacket('avaresponse', Buffer.alloc(0)));
+
+    assert.deepStrictEqual(handled, ['avaproof', 'avaresponse']);
+  });
+});
