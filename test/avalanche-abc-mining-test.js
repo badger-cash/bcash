@@ -120,8 +120,8 @@ suite(title, function() {
     const {best} = await submit(block);
     assert.strictEqual(best, block.rhash());
 
-    // bcash takes it too.
-    assert(await node.chain.add(block));
+    // ABC relays it, and bcash takes it too.
+    await until(() => node.chain.tip.hash.equals(block.hash()));
   });
 
   it('should have ABC park a block paying another winner', async () => {
