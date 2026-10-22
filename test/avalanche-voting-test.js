@@ -82,6 +82,12 @@ class FakePeer {
 class FakeMempool {
   constructor() {
     this.txs = new Map();
+    // Nothing kept aside as conflicting, nor finalized.
+    this.conflicting = {getTX: () => null};
+  }
+
+  isAvalancheFinalized() {
+    return false;
   }
 
   add(tx) {
@@ -147,7 +153,8 @@ class Setup {
       staleVoteThreshold: options.staleVoteThreshold,
       staleVoteFactor: options.staleVoteFactor,
       preConsensus: true,
-      mempool: this.mempool
+      // An SPV node has none.
+      mempool: options.noMempool ? null : this.mempool
     });
   }
 
@@ -1634,6 +1641,89 @@ describe('Avalanche unanimous votes below the connected ratio', function() {
     assert(processor.hasConnectedRatio());
 
     assert(await poll(block, () => 0, 100));
+  });
+});
+
+// For SPV clients: a transaction polled without a mempool, as the
+// client's own, once polls finalized a block since starting.
+describe('Avalanche transactions watched without a mempool', function() {
+  let setup, processor;
+
+  beforeEach(async () => {
+    setup = new Setup({noMempool: true});
+    processor = setup.processor;
+    await setup.connectNodes();
+  });
+
+  function randomTX() {
+    const mtx = new MTX();
+    mtx.addInput({prevout: {hash: random.randomBytes(32), index: 0}});
+    mtx.addOutput(Script.fromPubkeyhash(random.randomBytes(20)), 1000);
+    return mtx.toTX();
+  }
+
+  // Poll until a final verdict, each node voting `error`.
+  async function poll(tx, error, rounds = 20 * FINALIZATION_SCORE) {
+    const updates = [];
+    for (let i = 0; i < rounds; i++) {
+      const round = setup.getRound();
+      await setup.runEventLoop();
+      if (setup.getRound() === round)
+        continue;
+      const {nodeId} = [...processor.queries.values()]
+        .find(q => q.round === round);
+      const r = await setup.registerVotes(nodeId,
+        new Response(round, 0, [new Vote(error, tx.hash())]));
+      assert(r.ok);
+      // As handleResponse does.
+      for (const update of r.updates)
+        await processor.applyUpdate(update);
+      updates.push(...r.updates);
+      if (r.updates.some(u => u.status === voteStatus.FINALIZED
+          || u.status === voteStatus.INVALID)) {
+        break;
+      }
+    }
+    return updates.map(u => u.status);
+  }
+
+  it('should wait for polls to finalize a block, then poll', async () => {
+    const tx = randomTX();
+
+    assert(!processor.isPreconsensusActivated());
+    assert.strictEqual(await processor.watchTransaction(tx), false);
+    assert.strictEqual(processor.getTransactionStatus(tx.hash()), 'pending');
+
+    processor.finalizedSinceStart = true;
+    await processor.pollWatchedTransactions();
+    const key = `${itemTypes.TX}:${tx.hash().toString('hex')}`;
+    assert(processor.voteRecords.has(key));
+  });
+
+  it('should find one final', async () => {
+    processor.finalizedSinceStart = true;
+    const tx = randomTX();
+    assert(await processor.watchTransaction(tx));
+
+    const seen = [];
+    processor.on('tx vote', (t, status) => seen.push(status));
+
+    assert.deepStrictEqual(await poll(tx, 0), [voteStatus.FINALIZED]);
+    assert.strictEqual(processor.getTransactionStatus(tx.hash()), 'final');
+    assert.deepStrictEqual(seen, [voteStatus.FINALIZED]);
+
+    // Done with: not polled again.
+    assert.strictEqual(await processor.watchTransaction(tx), false);
+  });
+
+  it('should find one rejected, then invalid', async () => {
+    processor.finalizedSinceStart = true;
+    const tx = randomTX();
+    assert(await processor.watchTransaction(tx));
+
+    assert.deepStrictEqual(await poll(tx, 1),
+      [voteStatus.REJECTED, voteStatus.INVALID]);
+    assert.strictEqual(processor.getTransactionStatus(tx.hash()), 'invalid');
   });
 });
 
