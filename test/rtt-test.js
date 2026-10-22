@@ -9,6 +9,9 @@
  */
 
 const assert = require('bsert');
+const os = require('os');
+const path = require('path');
+const fs = require('bfile');
 const consensus = require('../lib/protocol/consensus');
 const Network = require('../lib/protocol/network');
 const {getNextRTTWorkRequired} = require('../lib/mining/rtt');
@@ -201,6 +204,44 @@ describe('RTT on a node', function() {
 
   after(async () => {
     await node.close();
+  });
+
+  it('should save and load when the last blocks were received', async () => {
+    // 20 blocks to save; with fewer, as Bitcoin ABC, none are.
+    assert(!await chain.dumpRecentHeadersTime('/nonexistent/file'));
+    for (let i = 0; i < 2; i++) {
+      const block = await miner.mineBlock(chain.tip, address);
+      assert(await chain.add(block));
+      received(chain.tip, 3600 * (2 - i) - 1800);
+    }
+
+    const file = path.join(os.tmpdir(), `bcash-headerstime-${process.pid}`);
+    const saved = new Map([...chain.receivedTimes]);
+
+    try {
+      assert(await chain.dumpRecentHeadersTime(file));
+      chain.receivedTimes.clear();
+      assert(await chain.loadRecentHeadersTime(file));
+
+      let entry = chain.tip;
+      for (let i = 0; i < 18; i++) {
+        assert.strictEqual(chain.getReceivedTime(entry.hash),
+          saved.get(entry.hash));
+        entry = await chain.getPrevious(entry);
+      }
+
+      // A file for another chain: none of it applies.
+      const data = await fs.readFile(file);
+      data.fill(1, 8, 40);
+      await fs.writeFile(file, data);
+      chain.receivedTimes.clear();
+      assert(!await chain.loadRecentHeadersTime(file));
+      assert.strictEqual(chain.receivedTimes.size, 0);
+    } finally {
+      for (const [hash, time] of saved)
+        chain.receivedTimes.set(hash, time);
+      await fs.unlink(file).catch(() => {});
+    }
   });
 
   it('should need no more than the bits an hour on', async () => {
