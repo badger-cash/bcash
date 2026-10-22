@@ -43,9 +43,11 @@ function coinbase() {
 }
 
 // A regtest block with valid proof of work, after a coinbase.
-function mineBlock(txs) {
+function mineBlock(txs, prevBlock) {
   const block = new Block();
   block.version = 1;
+  if (prevBlock)
+    block.prevBlock = prevBlock;
   block.bits = network.pow.bits;
   block.time = network.now();
   block.txs.push(coinbase(), ...txs);
@@ -142,4 +144,25 @@ describe('Pool SPV full blocks', function() {
     assert.strictEqual(peer.ban, 100);
     assert.strictEqual(added.length, 0);
   });
+
+  it('should drop a peer offering an anchored chain block 1', async () => {
+    // A Bitcoin Cash node, say: it knows none of the anchored chain's
+    // locator, so it offers block 1.
+    pool.chain.options.anchor = {height: 1000, hash: Buffer.alloc(32, 1)};
+    pool.syncing = true;
+    const block = mineBlock([], network.genesis.hash);
+    const peer = fakePeer();
+    peer.blockMap.set(block.hash(), Date.now());
+    pool.blockMap.add(block.hash());
+    let resolved = false;
+    pool.resolveOrphan = async () => {
+      resolved = true;
+    };
+
+    await pool._addBlock(peer, block, 0);
+
+    assert.strictEqual(peer.destroyed, true);
+    assert.strictEqual(resolved, false);
+  });
 });
+
