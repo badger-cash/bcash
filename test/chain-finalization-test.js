@@ -4,10 +4,10 @@
 'use strict';
 
 /*
- * Avalanche finalization in the chain, following Bitcoin ABC's
- * AvalancheFinalizeBlock and its parking of chains that fork before the
- * finalized tip. Unlike Bitcoin ABC, bcash keeps the finalized tip across
- * restarts.
+ * Avalanche finalization and parking in the chain, following Bitcoin
+ * ABC's AvalancheFinalizeBlock, ParkBlock and UnparkBlock, and its parking
+ * of chains that fork before the finalized tip. Unlike Bitcoin ABC, bcash
+ * keeps the finalized tip across restarts.
  */
 
 const assert = require('bsert');
@@ -21,11 +21,11 @@ const Network = require('../lib/protocol/network');
 
 const network = Network.get('regtest');
 
-async function createChain(prefix) {
+async function createChain(prefix, avalanche = true) {
   const memory = !prefix;
   const blocks = new BlockStore({network, memory,
     location: prefix && path.join(prefix, 'blocks')});
-  const chain = new Chain({network, memory, prefix, blocks});
+  const chain = new Chain({network, memory, prefix, blocks, avalanche});
   await blocks.open();
   await chain.open();
   const miner = new Miner({chain, version: 4});
@@ -69,7 +69,10 @@ describe('Chain finalization', function() {
   });
 
   it('should finalize nothing without avalanche', async () => {
+    await close(node);
+    node = await createChain(null, false);
     const [entry] = await mineMany(node, 1);
+    assert.strictEqual(await node.chain.finalize(entry), false);
     assert.strictEqual(node.chain.getFinalizedTip(), null);
     assert.strictEqual(node.chain.isFinalized(entry), false);
     assert.strictEqual(node.chain.isFinalized(entry.hash), false);
@@ -167,6 +170,132 @@ describe('Chain finalization', function() {
   });
 });
 
+describe('Chain parking', function() {
+  this.timeout(30000);
+
+  let node;
+
+  beforeEach(async () => {
+    node = await createChain();
+  });
+
+  afterEach(async () => {
+    await close(node);
+  });
+
+  it('should take a parked block off the main chain', async () => {
+    const {chain} = node;
+    const [base] = await mineMany(node, 1);
+    const a = await mineMany(node, 2, base);
+
+    const disconnected = [];
+    chain.on('disconnect', entry => disconnected.push(entry.height));
+
+    assert.strictEqual(await chain.park(a[0]), true);
+
+    assert.bufferEqual(chain.tip.hash, base.hash);
+    assert.deepStrictEqual(disconnected, [a[1].height, a[0].height]);
+    assert.strictEqual(chain.isParked(a[0].hash), true);
+    assert.strictEqual(await chain.isOnParkedChain(a[1]), true);
+  });
+
+  it('should move to the best chain without it', async () => {
+    const {chain} = node;
+    const [base] = await mineMany(node, 1);
+    const a = await mineMany(node, 2, base);
+    const b = await mineMany(node, 2, base);
+
+    // b has as much work as a, so a stayed the main chain.
+    assert.bufferEqual(chain.tip.hash, a[1].hash);
+
+    let reorg = null;
+    chain.on('reorganize', (old, tip) => {
+      reorg = [old.height, tip.hash];
+    });
+
+    await chain.park(a[0]);
+
+    assert.bufferEqual(chain.tip.hash, b[1].hash);
+    assert.deepStrictEqual(reorg, [a[1].height, b[1].hash]);
+  });
+
+  it('should not connect blocks on a parked chain', async () => {
+    const {chain} = node;
+    const [base] = await mineMany(node, 1);
+    const a = await mineMany(node, 1, base);
+
+    await chain.park(a[0]);
+
+    // More work than the tip, but through the parked block.
+    const more = await mineMany(node, 3, a[0]);
+    assert.bufferEqual(chain.tip.hash, base.hash);
+    assert.strictEqual(await chain.isMainChain(more[2]), false);
+  });
+
+  it('should move back when unparked', async () => {
+    const {chain} = node;
+    const [base] = await mineMany(node, 1);
+    const a = await mineMany(node, 1, base);
+
+    await chain.park(a[0]);
+    const more = await mineMany(node, 2, a[0]);
+    assert.bufferEqual(chain.tip.hash, base.hash);
+
+    const unparked = [];
+    chain.on('unparked', entry => unparked.push(entry.height));
+
+    await chain.unpark(more[1]);
+
+    // Unparking a descendant clears its parked ancestors.
+    assert.deepStrictEqual(unparked, [a[0].height]);
+    assert.bufferEqual(chain.tip.hash, more[1].hash);
+    assert.strictEqual(chain.isParked(a[0].hash), false);
+  });
+
+  it('should keep a descendant parked that was itself', async () => {
+    const {chain} = node;
+    const [base] = await mineMany(node, 1);
+    const a = await mineMany(node, 2, base);
+
+    await chain.park(a[1]);
+    assert.bufferEqual(chain.tip.hash, a[0].hash);
+    await chain.park(a[0]);
+    assert.bufferEqual(chain.tip.hash, base.hash);
+
+    await chain.unpark(a[0]);
+
+    assert.bufferEqual(chain.tip.hash, a[0].hash);
+    assert.strictEqual(chain.isParked(a[1].hash), true);
+  });
+
+  it('should not park a finalized block', async () => {
+    const {chain} = node;
+    const entries = await mineMany(node, 3);
+    await chain.finalize(entries[1]);
+
+    assert.strictEqual(await chain.park(entries[0]), false);
+    assert.strictEqual(await chain.park(entries[1]), false);
+    assert.bufferEqual(chain.tip.hash, entries[2].hash);
+
+    // Above it, it can.
+    assert.strictEqual(await chain.park(entries[2]), true);
+    assert.bufferEqual(chain.tip.hash, entries[1].hash);
+  });
+
+  it('should not move below the finalized tip to leave a park', async () => {
+    const {chain} = node;
+    const [base] = await mineMany(node, 1);
+    const a = await mineMany(node, 2, base);
+    // A longer fork from below what gets finalized.
+    await mineMany(node, 1, base);
+
+    await chain.finalize(a[0]);
+    await chain.park(a[1]);
+
+    assert.bufferEqual(chain.tip.hash, a[0].hash);
+  });
+});
+
 describe('Chain finalization across restarts', function() {
   this.timeout(30000);
 
@@ -192,6 +321,48 @@ describe('Chain finalization across restarts', function() {
     assert.bufferEqual(tip.hash, entries[1].hash);
     assert.strictEqual(node.chain.isFinalized(entries[0].hash), true);
     assert.strictEqual(node.chain.isFinalized(entries[2].hash), false);
+    await close(node);
+  });
+
+  it('should leave its state unused without avalanche', async () => {
+    let node = await createChain(prefix);
+    const entries = await mineMany(node, 3);
+    await node.chain.finalize(entries[0]);
+    await node.chain.park(entries[2]);
+    await close(node);
+
+    // As bcash runs without avalanche: none of it applies.
+    node = await createChain(prefix, false);
+    assert.strictEqual(node.chain.getFinalizedTip(), null);
+    assert.strictEqual(node.chain.isParked(entries[2].hash), false);
+    assert.strictEqual(await node.chain.finalize(entries[1]), false);
+    assert.strictEqual(await node.chain.park(entries[1]), false);
+
+    // The parked block's chain grows and becomes the main chain.
+    const more = await mineMany(node, 2, entries[2]);
+    assert.bufferEqual(node.chain.tip.hash, more[1].hash);
+    await close(node);
+
+    // Back on, the saved state returns.
+    node = await createChain(prefix);
+    assert.bufferEqual(node.chain.getFinalizedTip().hash, entries[0].hash);
+    assert.strictEqual(node.chain.isParked(entries[2].hash), true);
+    await close(node);
+  });
+
+  it('should keep parked blocks', async () => {
+    let node = await createChain(prefix);
+    const entries = await mineMany(node, 2);
+    await node.chain.park(entries[1]);
+    await close(node);
+
+    node = await createChain(prefix);
+    assert.strictEqual(node.chain.isParked(entries[1].hash), true);
+    assert.bufferEqual(node.chain.tip.hash, entries[0].hash);
+
+    // Still not the main chain, with more work on it.
+    await mineMany(node, 2, entries[1]);
+    assert.bufferEqual(node.chain.tip.hash, entries[0].hash);
     await close(node);
   });
 });
