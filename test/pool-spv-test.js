@@ -4,13 +4,14 @@
 'use strict';
 
 /*
- * An SPV pool requests only filtered blocks. A peer that answers with full
- * blocks must be dropped rather than kept as the sync loader, where it would
- * stall the sync (observed from a Bitcoin ABC 0.33.6 node answering a
- * 500-block filtered getdata with 500 full blocks).
+ * An SPV pool requests only filtered blocks. A full block it did not ask
+ * for gets the peer dropped. (One it asked for is filtered by the pool,
+ * as Bitcoin ABC 0.33.6 nodes answer a filtered getdata with full blocks:
+ * see pool-spv-fullblock-test.js.)
  */
 
 const assert = require('bsert');
+const {BufferMap} = require('buffer-map');
 const Chain = require('../lib/blockchain/chain');
 const Pool = require('../lib/net/pool');
 const Block = require('../lib/primitives/block');
@@ -20,6 +21,7 @@ const network = Network.get('regtest');
 
 function fakePeer() {
   return {
+    blockMap: new BufferMap(),
     destroyed: false,
     hostname: () => '127.0.0.1:18444',
     destroy() {
@@ -41,7 +43,7 @@ describe('Pool (SPV)', function() {
     await chain.close();
   });
 
-  it('drops a peer that sends a full block', async () => {
+  it('drops a peer that sends a full block not asked for', async () => {
     const peer = fakePeer();
     const block = Block.fromRaw(network.genesisBlock, 'hex');
 
