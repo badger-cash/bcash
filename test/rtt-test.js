@@ -283,9 +283,23 @@ describe('RTT on a node', function() {
     assert(chain.tip.hash.equals(block.hash()));
   });
 
+  // As Bitcoin ABC: the chain's finalized tip is kept across restarts,
+  // but a node catching up after one receives blocks moments apart.
+  it('should take one mined too soon after a restart', async () => {
+    assert(await chain.finalize(chain.tip));
+    assert(!node.pool.avalanche.hasFinalizedTip());
+
+    received(chain.tip, 0);
+    const block = await mineTooSoon();
+    assert(await chain.add(block));
+    assert(chain.tip.hash.equals(block.hash()));
+  });
+
   it('should park a block mined too soon once one is final', async () => {
     const tip = chain.tip;
     assert(await chain.finalize(tip));
+    // As polls finalizing a block would.
+    node.pool.avalanche.finalizedSinceStart = true;
     received(tip, 0);
 
     const block = await mineTooSoon();

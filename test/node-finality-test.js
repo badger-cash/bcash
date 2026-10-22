@@ -111,6 +111,21 @@ describe('Node finality', function() {
     assert.strictEqual(msg, 'Block not found');
   });
 
+  it('should park and unpark a block, as Bitcoin ABC', async () => {
+    // Not final: parked, the chain goes back a block; unparked, forward.
+    await client.execute('parkblock', [entries[2].rhash()]);
+    assert(node.chain.isParked(entries[2].hash));
+    assert(node.chain.tip.hash.equals(entries[1].hash));
+
+    await client.execute('unparkblock', [entries[2].rhash()]);
+    assert(!node.chain.isParked(entries[2].hash));
+    assert(node.chain.tip.hash.equals(entries[2].hash));
+
+    // A final block cannot be.
+    const msg = await rpcError(client, 'parkblock', [entries[1].rhash()]);
+    assert.strictEqual(msg, 'Block cannot be parked.');
+  });
+
   it('should answer isfinaltransaction', async () => {
     const txid = coinbase.txid();
     assert.strictEqual(
@@ -176,6 +191,8 @@ describe('Node finality without avalanche', function() {
     const msg = await rpcError(client, 'isfinalblock',
       [entries[0].rhash()]);
     assert.strictEqual(msg, 'Avalanche is not enabled.');
+    assert.strictEqual(await rpcError(client, 'parkblock',
+      [entries[0].rhash()]), 'Avalanche is not enabled.');
 
     const info = await client.execute('getblockchaininfo', []);
     assert.strictEqual(info.finalized_blockhash,
