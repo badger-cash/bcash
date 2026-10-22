@@ -155,7 +155,10 @@ class Setup {
       preConsensus: true,
       // An SPV node has none.
       mempool: options.noMempool ? null : this.mempool,
-      filterAwarePolling: options.filterAwarePolling
+      filterAwarePolling: options.filterAwarePolling,
+      // Fixed, as Bitcoin ABC's tests seed their random numbers: a voter
+      // filter's 16 bit hashes of two nodes can collide, dropping a vote.
+      voteRecordSeed: () => 0
     });
   }
 
