@@ -72,6 +72,7 @@ class FakeChain extends EventEmitter {
 // Serves blocks by height, as merkleblocks or whole.
 class FakePool {
   constructor() {
+    this.options = {maxOutbound: 8};
     this.blocks = new Map();
     this.bloom = true;
     this.scans = [];
@@ -86,25 +87,26 @@ class FakePool {
 
   async scanRange(options, iter) {
     const {filter, full} = options;
-    const start = options.entries[0].height;
     this.scans.push(full ? 'full' : 'merkle');
 
-    const block = this.blocks.get(start);
+    for (const entry of options.entries) {
+      const block = this.blocks.get(entry.height);
 
-    if (!full) {
-      if (!this.bloom)
-        throw new Error('No peers to scan from.');
-      const hashes = block.txs.filter(tx => filter.test(tx.hash()))
-        .map(tx => tx.hash());
-      const mb = MerkleBlock.fromHashes(block, hashes);
-      mb.txs = block.txs.filter(tx => hashes.some(h => h.equals(tx.hash())));
-      if (this.extra)
-        mb.txs.push(this.extra);
-      await iter({height: start}, mb);
-      return;
+      if (!full) {
+        if (!this.bloom)
+          throw new Error('No peers to scan from.');
+        const hashes = block.txs.filter(tx => filter.test(tx.hash()))
+          .map(tx => tx.hash());
+        const mb = MerkleBlock.fromHashes(block, hashes);
+        mb.txs = block.txs.filter(tx => hashes.some(h => h.equals(tx.hash())));
+        if (this.extra)
+          mb.txs.push(this.extra);
+        await iter(entry, mb);
+        continue;
+      }
+
+      await iter(entry, block);
     }
-
-    await iter({height: start}, block);
   }
 
   watchOutpoint(outpoint) {
@@ -169,6 +171,34 @@ describe('Avalanche SpvStakeVerifier', function() {
     // Cached.
     assert.deepStrictEqual(await verifier.verify(proof), [true, 'valid']);
     assert.deepStrictEqual(pool.scans, ['merkle']);
+  });
+
+  it('should find every stake of a proof in one scan', async () => {
+    const stakes = [];
+    for (const height of [100, 101, 102]) {
+      const [block, tx] = blockWith(stakeKey, amount);
+      chain.entries.set(height, {height, hash: block.hash()});
+      pool.blocks.set(height, block);
+      const stake = new Stake({
+        outpoint: new Outpoint(tx.hash(), 0),
+        amount,
+        height,
+        pubkey: pub(stakeKey)
+      });
+      stakes.push({stake, key: stakeKey});
+    }
+
+    const proof = Proof.build({
+      sequence: 0n,
+      expiration: 0n,
+      masterKey,
+      payout: Script.fromPubkey(pub(masterKey)),
+      stakes
+    });
+
+    assert.deepStrictEqual(await verifier.verify(proof), [true, 'valid']);
+    assert.deepStrictEqual(pool.scans, ['merkle']);
+    assert.strictEqual(pool.watched.length, 3);
   });
 
   it('should fetch the whole block without bloom peers', async () => {

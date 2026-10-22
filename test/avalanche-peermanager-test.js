@@ -105,6 +105,44 @@ function getRemoteProof(pm, proofId, nodeId) {
 const randomInt = max => Math.floor(Math.random() * max);
 
 describe('Avalanche PeerManager', function() {
+  it('should check proofs of waiting nodes first', async () => {
+    const {chain, pm} = setup();
+    const proofs = [];
+    for (let i = 0; i < 3; i++)
+      proofs.push(buildRandomProof(chain, MIN_VALID_PROOF_SCORE));
+
+    // A verifier that checks a proof when told to.
+    const order = [];
+    const held = new Map();
+    const verify = pm.verifier.verify.bind(pm.verifier);
+    pm.verifier.verify = (proof) => {
+      order.push(proof.id().toString('hex'));
+      return new Promise((resolve) => {
+        held.set(proof.id().toString('hex'), () => resolve(verify(proof)));
+      });
+    };
+    const release = async (proof) => {
+      while (!held.has(proof.id().toString('hex')))
+        await new Promise(r => setImmediate(r));
+      held.get(proof.id().toString('hex'))();
+    };
+
+    const [a, b, c] = proofs;
+    const done = proofs.map(p => pm.registerProof(p));
+
+    // A node waits on c: c is checked before b.
+    assert(!pm.addNode(7, c.id(), MAX_ELEMENTS));
+    await release(a);
+    await release(c);
+    await release(b);
+    await Promise.all(done);
+
+    assert.deepStrictEqual(order,
+      [a, c, b].map(p => p.id().toString('hex')));
+    assert(pm.getNode(7));
+    assert(!pm.verifyingProof);
+  });
+
   this.timeout(60000);
 
   describe('Peer selection', function() {
