@@ -61,6 +61,32 @@ describe('Pool avalanche addresses', function() {
     assert.strictEqual(p.getHost(), null);
   });
 
+  it('should discourage, not ban, as Bitcoin ABC', async () => {
+    const p = await pool(true);
+    await p.handleAddr(fakePeer, new packets.AddrPacket([
+      addr('51.255.199.24', AVALANCHE)
+    ]));
+
+    let destroyed = false;
+    p.discourage({
+      address: addr('51.255.199.24', AVALANCHE),
+      hostname: () => '51.255.199.24:18333',
+      destroy() {
+        destroyed = true;
+      }
+    });
+
+    // Disconnected and not dialed again, but its address is kept.
+    assert(destroyed);
+    assert(p.isDiscouraged('51.255.199.24'));
+    assert(p.hosts.map.has('51.255.199.24:18333'));
+    assert(!p.hosts.isBanned('51.255.199.24'));
+    assert.strictEqual(p.getAvalancheHost(), null);
+
+    // The processor discourages through it.
+    assert.strictEqual(typeof p.avalanche.discourage, 'function');
+  });
+
   it('should drop them without avalanche', async () => {
     const p = await pool(false);
     await p.handleAddr(fakePeer, new packets.AddrPacket([
