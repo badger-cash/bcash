@@ -43,11 +43,21 @@ function blockWith(key, amount) {
 }
 
 class FakeChain extends EventEmitter {
-  constructor() {
+  constructor(anchor = null) {
     super();
     this.height = 3000;
     this.tip = {height: 3000};
     this.entries = new Map();
+    this.options = {anchor};
+    this.network = {genesis: {hash: Buffer.alloc(32, 0)}, checkpoints: []};
+    this.saved = new Map();
+    this.db = {
+      getBelowAnchor: async height => this.saved.get(height) || null,
+      putBelowAnchor: async (hashes) => {
+        for (const [h, hash] of hashes)
+          this.saved.set(h, hash);
+      }
+    };
   }
 
   async getMedianTime() {
@@ -68,10 +78,14 @@ class FakePool {
     this.watched = [];
     // What a dishonest peer sends after its merkleblock.
     this.extra = null;
+    // Header hashes by height, and walks over them.
+    this.headers = [];
+    this.walks = 0;
   }
 
   async scanRange(options, iter) {
-    const {start, filter, full} = options;
+    const {filter, full} = options;
+    const start = options.entries[0].height;
     this.scans.push(full ? 'full' : 'merkle');
 
     const block = this.blocks.get(start);
@@ -94,6 +108,14 @@ class FakePool {
 
   watchOutpoint(outpoint) {
     this.watched.push(outpoint);
+  }
+
+  // Headers after `from` up to `stop`, from this.headers.
+  async fetchHeaders(from, stop) {
+    this.walks += 1;
+    const start = this.headers.findIndex(h => h.equals(from));
+    const end = this.headers.findIndex(h => h.equals(stop));
+    return this.headers.slice(start + 1, end + 1);
   }
 }
 
@@ -188,6 +210,53 @@ describe('Avalanche SpvStakeVerifier', function() {
 
     chain.entries.set(100, entry);
     assert.deepStrictEqual(await verifier.verify(proof), [true, 'valid']);
+  });
+
+  describe('below an anchor', function() {
+    // An anchored chain whose first block is at 2000; a checkpoint at 50.
+    function anchored() {
+      chain = new FakeChain({height: 2000});
+      verifier = new SpvStakeVerifier({chain, pool, confirmations: 1});
+      for (let h = 0; h <= 2000; h++)
+        pool.headers.push(random.randomBytes(32));
+      chain.entries.set(2000, {height: 2000, hash: pool.headers[2000]});
+      chain.network.checkpoints = [{height: 50, hash: pool.headers[50]}];
+    }
+
+    it('should find a stake by walking up to the anchor', async () => {
+      anchored();
+      const {block, proof} = setup();
+      // setup() put the stake's block in the chain; below an anchor it is
+      // not, but its hash is in the headers walked.
+      chain.entries.delete(100);
+      pool.headers[100] = block.hash();
+
+      assert.deepStrictEqual(await verifier.verify(proof), [true, 'valid']);
+      assert.strictEqual(pool.walks, 1);
+      // Kept, for the next run.
+      assert.bufferEqual(chain.saved.get(100), block.hash());
+    });
+
+    it('should not take a walk that misses the anchor', async () => {
+      anchored();
+      const {proof} = setup();
+      chain.entries.delete(100);
+      // A peer that stops short.
+      pool.fetchHeaders = async () => pool.headers.slice(51, 1000);
+
+      assert.deepStrictEqual(await verifier.verify(proof),
+        [false, 'utxo-missing-or-spent']);
+    });
+
+    it('should use a hash kept from an earlier run', async () => {
+      anchored();
+      const {block, proof} = setup();
+      chain.entries.delete(100);
+      chain.saved.set(100, block.hash());
+
+      assert.deepStrictEqual(await verifier.verify(proof), [true, 'valid']);
+      assert.strictEqual(pool.walks, 0);
+    });
   });
 
   it('should see a spend in a connected block, and undo it', async () => {
