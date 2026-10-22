@@ -189,6 +189,29 @@ describe('Mempool avalanche pre-consensus', function() {
     assert(!mempool.hasEntry(other.hash()));
   });
 
+  it('should refuse a double spend, as before, without avalanche', async () => {
+    const coin = coins.getCoins()[0];
+    const txs = [];
+    for (let i = 0; i < 2; i++) {
+      const mtx = new MTX();
+      mtx.addCoin(coin);
+      mtx.addOutput(wallet.createReceive().getAddress(), 90000 - i);
+      coins.sign(mtx);
+      txs.push(mtx.toTX());
+    }
+    coins.addTX(txs[0], -1);
+
+    await mempool.addTX(txs[0]);
+    let reason = null;
+    try {
+      await mempool.addTX(txs[1]);
+    } catch (e) {
+      reason = e.reason;
+    }
+    assert.strictEqual(reason, 'bad-txns-inputs-spent');
+    assert.strictEqual(mempool.conflicting.size, 0);
+  });
+
   it('should finalize no more than fits in a block', async () => {
     const tx = await spend();
     const entry = mempool.getEntry(tx.hash());
@@ -213,7 +236,7 @@ describe('Pool transaction votes', function() {
 
   const blocks = new BlockStore({memory: true});
   const chain = new Chain({memory: true, blocks, avalanche: true});
-  const mempool = new Mempool({chain, memory: true});
+  const mempool = new Mempool({chain, memory: true, avalanche: true});
   const pool = new Pool({chain, mempool, memory: true, listen: false,
     avalanche: true, avalanchePreConsensus: true});
   const {voteStatus} = Processor;
@@ -238,6 +261,30 @@ describe('Pool transaction votes', function() {
     assert.strictEqual(await mempool.addTX(tx), null);
     return tx;
   }
+
+  // Transactions spending the same coin.
+  function doubleSpend() {
+    const coin = coins.getCoins()[0];
+    const txs = [];
+    for (let i = 0; i < 3; i++) {
+      const mtx = new MTX();
+      mtx.addCoin(coin);
+      mtx.addOutput(KeyRing.generate().getAddress(), 90000 - i);
+      coins.sign(mtx);
+      txs.push(mtx.toTX());
+    }
+    coins.addTX(txs[0], -1);
+    return txs;
+  }
+
+  const verifyError = async (tx) => {
+    try {
+      await mempool.addTX(tx);
+    } catch (e) {
+      return e.reason;
+    }
+    return null;
+  };
 
   before(async () => {
     await blocks.open();
@@ -308,6 +355,53 @@ describe('Pool transaction votes', function() {
 
     await pool.finalizedBlockForMempool(entry);
     assert(!mempool.isAvalancheFinalized(tx.hash()));
+  });
+
+  // Bitcoin ABC's TX_AVALANCHE_RECONSIDERABLE and TxConflicting.
+  it('should keep a double spend aside, not over a final one', async () => {
+    const [tx, other] = doubleSpend();
+    await mempool.addTX(tx);
+
+    assert.strictEqual(await verifyError(other), 'txn-mempool-conflict');
+    assert(mempool.conflicting.has(other.hash()));
+    assert(mempool.isWorthPolling(other.hash()));
+
+    // Final: its conflicts are rejected.
+    await pool.applyTxVote(tx, voteStatus.FINALIZED);
+    assert(!mempool.conflicting.has(other.hash()));
+    assert(mempool.rejects.test(other.hash()));
+  });
+
+  it('should refuse a double spend of a final one', async () => {
+    const [tx, , third] = doubleSpend();
+    await mempool.addTX(tx);
+    await pool.applyTxVote(tx, voteStatus.FINALIZED);
+
+    assert.strictEqual(await verifyError(third), 'finalized-tx-conflict');
+    assert(!mempool.conflicting.has(third.hash()));
+  });
+
+  it('should take a conflicting one avalanche accepts', async () => {
+    const [tx, other] = doubleSpend();
+    await mempool.addTX(tx);
+    await verifyError(other);
+
+    await pool.applyTxVote(other, voteStatus.ACCEPTED);
+    assert(mempool.hasEntry(other.hash()));
+    assert(!mempool.hasEntry(tx.hash()));
+    // The one it displaced waits aside.
+    assert(mempool.conflicting.has(tx.hash()));
+    assert(!mempool.conflicting.has(other.hash()));
+  });
+
+  it('should let in the one kept out, as one is rejected', async () => {
+    const [tx, other] = doubleSpend();
+    await mempool.addTX(tx);
+    await verifyError(other);
+
+    await pool.applyTxVote(tx, voteStatus.REJECTED);
+    assert(mempool.hasEntry(other.hash()));
+    assert(mempool.conflicting.has(tx.hash()));
   });
 });
 
