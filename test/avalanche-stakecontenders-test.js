@@ -248,6 +248,33 @@ describe('Avalanche staking pre-consensus', function() {
     assert.strictEqual(processor.getStakingRewardWinners(highHash), null);
   });
 
+  it('should compute rewards below a new tip, to the finalized', async () => {
+    for (let i = 0; i < 10; i++) {
+      const proof = setup.getProof();
+      assert((await pm.registerProof(proof))[0]);
+      assert(pm.addNode(i, proof.id(), MAX_ELEMENT_POLL));
+      setup.finalizePeer(proof);
+    }
+    setup.now += HOUR + 1;
+
+    // Six blocks at once, then the tip.
+    const blocks = [];
+    for (let i = 0; i < 6; i++)
+      blocks.push(setup.mine());
+    await setup.updatedBlockTip();
+
+    const has = entry => setup.winners(entry) != null;
+    assert.deepStrictEqual(blocks.map(has),
+      [false, false, true, true, true, true]);
+
+    // Not at, nor below, the finalized block.
+    processor.cleanupStakingRewards(1000);
+    processor.finalizationTip = blocks[4];
+    await setup.updatedBlockTip();
+    assert.deepStrictEqual(blocks.map(has),
+      [false, false, false, false, false, true]);
+  });
+
   // Bitcoin ABC's stake_contenders.
   it('should cache, promote and clean up stake contenders', async () => {
     let tip = setup.chain.tip;
