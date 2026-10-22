@@ -195,5 +195,24 @@ describe('Pool avalanche quorum', function() {
     const {avalanche} = await spvPool({avaMinQuorumUnanimousStakeRatio: 0.8});
     assert.strictEqual(avalanche.minQuorumUnanimousScoreRatio, 0.8);
   });
+
+  it('should poll filter aware on SPV only', async () => {
+    assert((await spvPool()).avalanche.filterAwarePolling);
+    assert(!(await pool(true)).avalanche.filterAwarePolling);
+  });
+
+  it('should keep 17 avalanche nodes on SPV, with the ratio', async () => {
+    const p = await spvPool();
+    let ratio = false;
+    p.avalanche.hasConnectedRatio = () => ratio;
+    assert.strictEqual(p.avalancheOutboundLimit(), 150);
+    ratio = true;
+    assert.strictEqual(p.avalancheOutboundLimit(), 17);
+
+    // A full node keeps Bitcoin ABC's.
+    const full = await pool(true);
+    full.avalanche.hasConnectedRatio = () => true;
+    assert.strictEqual(full.avalancheOutboundLimit(), 150);
+  });
 });
 

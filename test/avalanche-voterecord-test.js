@@ -292,4 +292,28 @@ describe('Avalanche VoteRecord', function() {
     assert(vr.registerVote(nextNodeId(), 0));
     assert(vr.hasFinalized());
   });
+
+  it('should say whether a vote would count', () => {
+    const vr = new VoteRecord(true, random.randomInt());
+
+    // Seven voters: none of them again, until an eighth votes.
+    for (let id = 0; id < 7; id++)
+      vr.registerVote(id, 0);
+    for (let id = 0; id < 7; id++)
+      assert(!vr.wouldCount(id));
+    assert(vr.wouldCount(7));
+
+    vr.registerVote(7, 0);
+    assert(vr.wouldCount(0));
+    assert(!vr.wouldCount(1));
+
+    // As registerVote counts, for voters at random.
+    for (let i = 0; i < 1000; i++) {
+      const id = random.randomRange(0, 12);
+      const counts = vr.wouldCount(id);
+      const before = vr.successfulVotes;
+      vr.registerVote(id, 0);
+      assert.strictEqual(vr.successfulVotes > before, counts);
+    }
+  });
 });

@@ -154,7 +154,8 @@ class Setup {
       staleVoteFactor: options.staleVoteFactor,
       preConsensus: true,
       // An SPV node has none.
-      mempool: options.noMempool ? null : this.mempool
+      mempool: options.noMempool ? null : this.mempool,
+      filterAwarePolling: options.filterAwarePolling
     });
   }
 
@@ -1641,6 +1642,66 @@ describe('Avalanche unanimous votes below the connected ratio', function() {
     assert(processor.hasConnectedRatio());
 
     assert(await poll(block, () => 0, 100));
+  });
+});
+
+// For SPV nodes, with few nodes: poll only nodes whose vote counts, as
+// Bitcoin ABC counts a node's vote once in any 8.
+describe('Avalanche filter aware polling', function() {
+  const {BLOCK} = itemTypes;
+
+  // Stakers with a node each; polls until final, every node voting yes.
+  async function finalize(options, stakers) {
+    const setup = new Setup(options);
+    for (let i = 0; i < stakers; i++)
+      await setup.connectNodes(1);
+    const block = setup.chain.mine();
+    assert(await setup.processor.addToReconcile(BLOCK, block));
+
+    let polls = 0;
+    for (let i = 0; i < 20 * FINALIZATION_SCORE; i++) {
+      const round = setup.getRound();
+      await setup.runEventLoop();
+      if (setup.getRound() === round)
+        continue;
+      polls++;
+      const {nodeId} = [...setup.processor.queries.values()]
+        .find(q => q.round === round);
+      const r = await setup.registerVotes(nodeId,
+        new Response(round, 0, [new Vote(0, block.hash)]));
+      assert(r.ok);
+      if (r.updates.some(u => u.status === voteStatus.FINALIZED))
+        return polls;
+    }
+    return null;
+  }
+
+  // 7 votes to agree, then one for each point of confidence.
+  const VOTES = 7 + FINALIZATION_SCORE - 1;
+
+  it('should count every vote with nine nodes', async () => {
+    assert.strictEqual(await finalize({filterAwarePolling: true}, 9), VOTES);
+  });
+
+  it('should waste votes with nine nodes, as Bitcoin ABC', async () => {
+    assert(await finalize({}, 9) > VOTES);
+  });
+
+  it('should select only nodes it accepts, free', async () => {
+    const setup = new Setup();
+    const nodes = [];
+    for (let i = 0; i < 3; i++)
+      nodes.push(...await setup.connectNodes(1));
+    const [a, b] = nodes.map(n => n.id);
+
+    for (let i = 0; i < 20; i++)
+      assert.strictEqual(setup.pm.selectNodeWhere(id => id === a), a);
+    assert.strictEqual(setup.pm.selectNodeWhere(() => false), NO_NODE);
+
+    // Not while its poll is out.
+    setup.pm.updateNextRequestTimeForPoll(a, setup.ms() + 1000, 0n);
+    assert.strictEqual(setup.pm.selectNodeWhere(id => id === a), NO_NODE);
+    assert.strictEqual(setup.pm.selectNodeWhere(id => id !== b), nodes[2].id);
   });
 });
 
