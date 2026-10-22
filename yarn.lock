@@ -179,11 +179,6 @@ balanced-match@^1.0.0:
   dependencies:
     bsert "~0.0.10"
 
-big-integer@1.6.36:
-  version "1.6.36"
-  resolved "https://registry.yarnpkg.com/big-integer/-/big-integer-1.6.36.tgz#78631076265d4ae3555c04f85e7d9d2f3a071a36"
-  integrity sha512-t70bfa7HYEA1D9idDbmuv7YbsbVkQ+Hp+8KFSul4aE5e/i1bjCNIRYJZlA8Q8p0r9T8cF/RVvwUgRA//FydEyg==
-
 "binet@git+https://github.com/bcoin-org/binet.git#semver:~0.3.5", binet@~0.3.5:
   version "0.3.7"
   resolved "git+https://github.com/bcoin-org/binet.git#138bbd45f343a35259333ac7cc995c3542b6d7dc"
@@ -396,13 +391,6 @@ doctrine@^3.0.0:
   integrity sha512-yS+Q5i3hBf7GBkd4KG8a7eBNNWNGLTaEwwYWUijIYM7zrlYDM0BFXHjjPWlWZ1Rg7UaddZeIDmi9jF3HmqiQ2w==
   dependencies:
     esutils "^2.0.2"
-
-ecashaddrjs@^1.0.7:
-  version "1.0.7"
-  resolved "https://registry.yarnpkg.com/ecashaddrjs/-/ecashaddrjs-1.0.7.tgz#22dc0842d0c3e186f9f160ca55299b679ab17d8a"
-  integrity sha512-KsvHYLlYtLr/GBkEPiwwQDIDBzqRx61qC34n1puHKOjVE4Uwg3syHccjFCqNynLa6T6xI0Rd7ByCRUJcuJcoIw==
-  dependencies:
-    big-integer "1.6.36"
 
 escape-string-regexp@^4.0.0:
   version "4.0.0"
