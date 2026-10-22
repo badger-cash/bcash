@@ -5,7 +5,11 @@
 
 /*
  * A port of Bitcoin ABC's src/avalanche/test/processor_tests.cpp for the
- * vote items bcash polls: proofs and blocks.
+ * vote items bcash polls: proofs, blocks and transactions (Bitcoin ABC's
+ * TxProvider, against a fake mempool). Stake contenders are in
+ * avalanche-stakecontenders-test.js. Bitcoin ABC has no other
+ * transaction-only processor tests: what its mempool does with votes is
+ * not the processor's.
  */
 
 const assert = require('bsert');
@@ -21,6 +25,10 @@ const ProofPool = require('../lib/avalanche/proofpool');
 const VoteRecord = require('../lib/avalanche/voterecord');
 const ChainStakeVerifier = require('../lib/avalanche/stakeverifier');
 const {Vote, Response, invTypes} = require('../lib/avalanche/protocol');
+const {compareIds} = require('../lib/avalanche/proof');
+const MTX = require('../lib/primitives/mtx');
+const Outpoint = require('../lib/primitives/outpoint');
+const Script = require('../lib/script/script');
 const {
   pub,
   buildProof,
@@ -69,9 +77,37 @@ class FakePeer {
   }
 }
 
+// The mempool the processor polls transactions from: what is in it is
+// worth polling, as Bitcoin ABC's TestMemPoolEntryHelper entries are.
+class FakeMempool {
+  constructor() {
+    this.txs = new Map();
+  }
+
+  add(tx) {
+    this.txs.set(tx.hash().toString('hex'), tx);
+  }
+
+  remove(tx) {
+    this.txs.delete(tx.hash().toString('hex'));
+  }
+
+  getTX(hash) {
+    return this.txs.get(hash.toString('hex')) || null;
+  }
+
+  hasEntry(hash) {
+    return this.txs.has(hash.toString('hex'));
+  }
+
+  isWorthPolling(hash) {
+    return this.hasEntry(hash);
+  }
+}
+
 /**
- * Bitcoin ABC's AvalancheProcessorTestingSetup: a chain, a peer manager,
- * and a processor that needs no stake for a quorum.
+ * Bitcoin ABC's AvalancheProcessorTestingSetup: a chain, a mempool, a
+ * peer manager, and a processor that needs no stake for a quorum.
  */
 
 class Setup {
@@ -83,6 +119,8 @@ class Setup {
 
     this.chain = new FakeChain(100);
     this.chain.initBlocks();
+
+    this.mempool = new FakeMempool();
 
     this.pm = new PeerManager({
       verifier: new ChainStakeVerifier({
@@ -107,7 +145,9 @@ class Setup {
       minAvaproofsNodeCount: 0,
       queryTimeout: options.queryTimeout,
       staleVoteThreshold: options.staleVoteThreshold,
-      staleVoteFactor: options.staleVoteFactor
+      staleVoteFactor: options.staleVoteFactor,
+      preConsensus: true,
+      mempool: this.mempool
     });
   }
 
@@ -224,6 +264,36 @@ function proofProvider(setup) {
   };
 }
 
+// Bitcoin ABC's TxProvider: a transaction in the mempool.
+function txProvider(setup) {
+  return {
+    name: 'transaction',
+    type: itemTypes.TX,
+    invType: invTypes.TX,
+    async build() {
+      const mtx = new MTX();
+      mtx.version = 2;
+      mtx.addInput({prevout: new Outpoint(random.randomBytes(32), 0)});
+      mtx.addOutput(Script.fromRaw(Buffer.from([0x51])), 100000000);
+      const tx = mtx.toTX();
+      setup.mempool.add(tx);
+      assert(setup.mempool.hasEntry(tx.hash()));
+      return tx;
+    },
+    id: tx => tx.hash(),
+    // By txid, as uint256s.
+    votes(error, items) {
+      return items.slice()
+        .sort((a, b) => compareIds(a.hash(), b.hash()))
+        .map(tx => new Vote(error, tx.hash()));
+    },
+    async invalidate(tx) {
+      setup.mempool.remove(tx);
+      assert(!setup.mempool.hasEntry(tx.hash()));
+    }
+  };
+}
+
 // Bitcoin ABC's TestVoteRecord: accepted, at a confidence.
 function testVoteRecord(confidence) {
   const record = new VoteRecord(true);
@@ -238,7 +308,7 @@ function addVoteRecord(setup, provider, item, record) {
     {type: provider.type, hash, item, record});
 }
 
-for (const makeProvider of [blockProvider, proofProvider]) {
+for (const makeProvider of [blockProvider, proofProvider, txProvider]) {
   describe(`Avalanche voting on a ${makeProvider({}).name}`, function() {
     this.timeout(120000);
 
