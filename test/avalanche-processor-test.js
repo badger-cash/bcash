@@ -487,6 +487,39 @@ describe('Avalanche Processor', function() {
     assert.strictEqual(processor.isQuorumEstablished(), true);
   });
 
+  // Bitcoin ABC asks a few nodes for their proofs until one answers, then
+  // every node at its next periodic round; bcash at once, not minutes on.
+  it('should ask every node once the first sends its proofs', async () => {
+    const peers = [];
+    for (let i = 0; i < 5; i++) {
+      const peer = await connect(new FakePeer(i + 1));
+      const proof = stakingProof();
+      await processor.handlePacket(peer, unknown('avahello',
+        staker(peer, proof, secp256k1.privateKeyGenerate()).toRaw()));
+      await processor.handlePacket(peer, unknown('avaproof', proof.toRaw()));
+      peers.push(peer);
+    }
+
+    // Not asked yet, as during a sync.
+    for (const peer of peers)
+      peer.sent.length = 0;
+    for (const state of processor.peers.values())
+      state.compactProofsRequested = false;
+
+    const asked = () => peers.filter(p => p.last('getavaproofs')).length;
+
+    processor.periodicNetworking();
+    assert.strictEqual(asked(), 3);
+
+    // The first proofs from one of them: the rest are asked now.
+    const state = [...processor.peers.values()]
+      .find(s => s.compactProofsRequested);
+    await processor.handlePacket(state.peer, unknown('avaproofs',
+      CompactProofs.fromProofs(pm.getShareableProofs()).toRaw()));
+    assert.strictEqual(processor.avaproofsNodeCounter, 1);
+    assert.strictEqual(asked(), peers.length);
+  });
+
   it('should forget a node when its peer goes', async () => {
     const peer = await connect(new FakePeer(1));
     const proof = stakingProof();
