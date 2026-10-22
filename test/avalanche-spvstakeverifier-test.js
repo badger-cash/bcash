@@ -81,6 +81,7 @@ class FakePool {
     // Header hashes by height, and walks over them.
     this.headers = [];
     this.walks = 0;
+    this.stops = [];
   }
 
   async scanRange(options, iter) {
@@ -113,6 +114,7 @@ class FakePool {
   // Headers after `from` up to `stop`, from this.headers.
   async fetchHeaders(from, stop) {
     this.walks += 1;
+    this.stops.push(stop);
     const start = this.headers.findIndex(h => h.equals(from));
     const end = this.headers.findIndex(h => h.equals(stop));
     return this.headers.slice(start + 1, end + 1);
@@ -246,6 +248,27 @@ describe('Avalanche SpvStakeVerifier', function() {
 
       assert.deepStrictEqual(await verifier.verify(proof),
         [false, 'utxo-missing-or-spent']);
+    });
+
+    it('should stop a walk where an earlier one started', async () => {
+      anchored();
+      chain.network.checkpoints.push({height: 1000, hash: pool.headers[1000]});
+
+      // From the checkpoint at 1000 up to the anchor; then from 50, only
+      // up to 1000.
+      const high = await verifier.blockAt(1500);
+      assert.bufferEqual(high.hash, pool.headers[1500]);
+      assert.bufferEqual(pool.stops[0], pool.headers[2000]);
+
+      const low = await verifier.blockAt(100);
+      assert.bufferEqual(low.hash, pool.headers[100]);
+      assert.strictEqual(pool.walks, 2);
+      assert.bufferEqual(pool.stops[1], pool.headers[1000]);
+
+      // Every height between is known, with no walk.
+      assert.bufferEqual((await verifier.blockAt(1200)).hash,
+        pool.headers[1200]);
+      assert.strictEqual(pool.walks, 2);
     });
 
     it('should use a hash kept from an earlier run', async () => {
