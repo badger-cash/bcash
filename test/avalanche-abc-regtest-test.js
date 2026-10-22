@@ -10,7 +10,6 @@
  */
 
 const assert = require('bsert');
-const {cashaddr} = require('bstring');
 const hash160 = require('bcrypto/lib/hash160');
 const secp256k1 = require('bcrypto/lib/secp256k1');
 const KeyRing = require('../lib/primitives/keyring');
@@ -25,11 +24,10 @@ const ABCRegtest = require('./util/abc-regtest');
 // Satoshis; regtest coinbases are below the mainnet threshold.
 const DUST_THRESHOLD = 1000000;
 
-// ABC's regtest keys use testnet's prefix; bcash's regtest has bcoin's.
-const wif = key => KeyRing.fromPrivate(key).toSecret('testnet');
+const wif = key => KeyRing.fromPrivate(key).toSecret('regtest');
 const pub = key => secp256k1.publicKeyCreate(key, true);
-const abcAddress = key => cashaddr.encode('ecregtest', 0,
-  hash160.digest(pub(key)));
+const address = key => KeyRing.fromPrivate(key).getAddress()
+  .toString('regtest');
 
 // Skipped, saying why, without a Bitcoin ABC node to check against.
 const available = ABCRegtest.available();
@@ -120,7 +118,7 @@ suite(title, function() {
     }));
 
     const hex = await abc.call('buildavalancheproof', 7, 0, wif(masterKey),
-      stakes, abcAddress(masterKey));
+      stakes, address(masterKey));
 
     const proof = Proof.fromHex(hex);
     assert.strictEqual(proof.toHex(), hex);

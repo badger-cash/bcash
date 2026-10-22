@@ -135,8 +135,7 @@ class ABCRegtest {
 
   async stake() {
     const pub = key => secp256k1.publicKeyCreate(key, true);
-    // ABC's regtest keys use testnet's prefix; bcash's regtest has bcoin's.
-    const wif = key => KeyRing.fromPrivate(key).toSecret('testnet');
+    const wif = key => KeyRing.fromPrivate(key).toSecret('regtest');
 
     const masterKey = secp256k1.privateKeyGenerate();
     const stakeKey = secp256k1.privateKeyGenerate();
