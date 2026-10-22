@@ -17,6 +17,9 @@ const Network = require('../lib/protocol/network');
 const NetAddress = require('../lib/net/netaddress');
 const packets = require('../lib/net/packets');
 const common = require('../lib/net/common');
+const Processor = require('../lib/avalanche/processor');
+const MTX = require('../lib/primitives/mtx');
+const Script = require('../lib/script/script');
 
 const {NETWORK, AVALANCHE} = common.services;
 
@@ -194,6 +197,33 @@ describe('Pool avalanche quorum', function() {
   it('should take the ratio it is given', async () => {
     const {avalanche} = await spvPool({avaMinQuorumUnanimousStakeRatio: 0.8});
     assert.strictEqual(avalanche.minQuorumUnanimousScoreRatio, 0.8);
+  });
+
+  it('should announce and poll again our own stalled transaction', async () => {
+    const p = await spvPool();
+    const ava = p.avalanche;
+    const mtx = new MTX();
+    mtx.addInput({prevout: {hash: Buffer.alloc(32, 1), index: 0}});
+    mtx.addOutput(new Script(), 1000);
+    const tx = mtx.toTX();
+
+    const did = [];
+    p.markStalled = () => did.push('marked');
+    p.broadcast = async () => did.push('broadcast');
+    const watch = ava.watchTransaction.bind(ava);
+    ava.watchTransaction = async (t) => {
+      did.push('watched');
+      return watch(t);
+    };
+    p.on('tx stale', () => did.push('stale'));
+
+    // Not ours: nothing.
+    ava.emit('tx vote', tx, Processor.voteStatus.STALE);
+    assert.deepStrictEqual(did, []);
+
+    await watch(tx);
+    ava.emit('tx vote', tx, Processor.voteStatus.STALE);
+    assert.deepStrictEqual(did, ['marked', 'broadcast', 'watched', 'stale']);
   });
 
   it('should poll filter aware on SPV only', async () => {

@@ -342,6 +342,22 @@ describe('Pool transaction votes', function() {
     assert(mempool.rejects.test(invalid.hash()));
   });
 
+  it('should drop a stalled one, to announce again', async () => {
+    const tx = await spend();
+    const marked = [];
+    const markStalled = pool.markStalled;
+    pool.markStalled = hash => marked.push(hash);
+    try {
+      await pool.applyTxVote(tx, voteStatus.STALE);
+    } finally {
+      pool.markStalled = markStalled;
+    }
+    assert(!mempool.hasEntry(tx.hash()));
+    assert(!mempool.rejects.test(tx.hash()));
+    assert.strictEqual(marked.length, 1);
+    assert.bufferEqual(marked[0], tx.hash());
+  });
+
   it('should forget mined ones as their block is final', async () => {
     const tx = await spend();
     await pool.applyTxVote(tx, voteStatus.FINALIZED);
