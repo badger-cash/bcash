@@ -257,8 +257,12 @@ describe('RTT on a node', function() {
     assert(bits != null);
     assert(targetLt(bits, tip.bits));
 
-    // The miner aims for it, its header keeps the bits, and
-    // getblocktemplate says so, as Bitcoin ABC.
+    // The miner aims for it once polls finalized a block since starting,
+    // its header keeps the bits, and getblocktemplate says so, as
+    // Bitcoin ABC.
+    assert.strictEqual((await miner.createBlock(tip, address)).rttBits,
+      null);
+    node.pool.avalanche.finalizedSinceStart = true;
     const attempt = await miner.createBlock(tip, address);
     assert.strictEqual(attempt.rttBits, bits);
     assert.strictEqual(attempt.bits, tip.bits);
@@ -274,6 +278,8 @@ describe('RTT on a node', function() {
     assert(targetLt(parseInt(rtt.nexttarget, 16), tip.bits));
     assert.strictEqual(rtt.prevheadertime.length, 5);
     assert.strictEqual(rtt.prevheadertime[0], chain.getReceivedTime(tip.hash));
+
+    node.pool.avalanche.finalizedSinceStart = false;
   });
 
   it('should take a block mined too soon before any is final', async () => {
