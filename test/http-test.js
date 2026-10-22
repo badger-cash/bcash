@@ -246,6 +246,10 @@ describe('HTTP', function() {
       submitold: false,
       coinbaseaux: { flags: '6d696e65642062792062636f696e' },
       coinbasevalue: 5000000000,
+      // As Bitcoin ABC: no miner fund on regtest.
+      coinbasetxn: {
+        minerfund: { addresses: [], minimumvalue: 0 }
+      },
       transactions: []
     });
   });
