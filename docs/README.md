@@ -11,6 +11,7 @@ Welcome to the bcoin docs!
 - [Bcoin CLI][cli]
 - [Running in the Browser][browser]
 - [REST and RPC API][rest-rpc]
+- [Avalanche][avalanche]
 
 ## Deployment
 - [Running a Public Node Behind nginx (Hardened)][public-node-nginx]
@@ -37,6 +38,7 @@ Welcome to the bcoin docs!
 [guides]: http://bcoin.io/guides.html
 
 [cli]: CLI.md
+[avalanche]: Avalanche.md
 [browser]: Running-in-the-browser.md
 [rest-rpc]: http://bcoin.io/api-docs/index.html#introduction
 
