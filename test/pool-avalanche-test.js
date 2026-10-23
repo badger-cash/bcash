@@ -129,6 +129,46 @@ describe('Pool avalanche addresses', function() {
     assert.strictEqual(p.getAvalancheHost(), null);
   });
 
+  it('should refuse an addr of more than 1000, as Bitcoin ABC', async () => {
+    const p = await pool(true);
+    let discouraged = false;
+    p.discourage = () => {
+      discouraged = true;
+    };
+    const items = [];
+    for (let i = 0; i < 1001; i++)
+      items.push(addr(`51.${i >> 8}.${i & 255}.9`, NETWORK | AVALANCHE));
+    await p.handleAddr({...fakePeer, id: 1}, new packets.AddrPacket(items));
+    assert(discouraged);
+    assert.strictEqual(p.avalancheHosts.size, 0);
+  });
+
+  it('should keep the avalanche nodes most peers list, when full',
+    async () => {
+      const p = await pool(true);
+      p.hosts.add = () => false;
+
+      // Listed by three peers.
+      for (let id = 1; id <= 3; id++) {
+        await p.handleAddr({...fakePeer, id}, new packets.AddrPacket([
+          addr('51.255.199.40', NETWORK | AVALANCHE)
+        ]));
+      }
+
+      // One peer's addrs, past the cap of 2000.
+      for (let n = 0; n < 3; n++) {
+        const items = [];
+        for (let i = 0; i < 1000; i++) {
+          const j = n * 1000 + i;
+          items.push(addr(`52.${j >> 8}.${j & 255}.9`, NETWORK | AVALANCHE));
+        }
+        await p.handleAddr({...fakePeer, id: 9}, new packets.AddrPacket(items));
+      }
+
+      assert.strictEqual(p.avalancheHosts.size, 2000);
+      assert(p.avalancheHosts.has('51.255.199.40:18333'));
+    });
+
   it('should discourage, not ban, as Bitcoin ABC', async () => {
     const p = await pool(true);
     await p.handleAddr(fakePeer, new packets.AddrPacket([
