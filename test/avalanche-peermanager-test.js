@@ -192,6 +192,49 @@ describe('Avalanche PeerManager', function() {
     assert.strictEqual(cut.length, 2);
   });
 
+  it('should save again the peers it loaded and has not checked yet',
+    async () => {
+      const {chain, clock, pm} = setup();
+      const proofs = [];
+      for (let i = 0; i < 3; i++) {
+        const proof = buildRandomProof(chain, MIN_VALID_PROOF_SCORE);
+        assert((await pm.registerProof(proof))[0]);
+        proofs.push(proof);
+      }
+      const data = pm.dumpPeers();
+      const count = buf => buf.readUInt32LE(8);
+      assert.strictEqual(count(data), 3);
+
+      // A new run that checks the second slowly; it stops before then.
+      const next = new PeerManager({verifier: pm.verifier,
+        now: () => clock.time, ms: () => clock.ms});
+      const verify = next.verifier.verify.bind(next.verifier);
+      let release;
+      const held = new Promise(r => (release = r));
+      next.verifier = {
+        verify: async (proof) => {
+          if (proof.id().equals(proofs[1].id()))
+            await held;
+          return verify(proof);
+        }
+      };
+
+      const loading = next.loadPeers(data);
+      await new Promise(r => setImmediate(r));
+
+      // One registered, two not checked: all three saved.
+      assert.strictEqual(next.peers.size, 1);
+      assert.strictEqual(count(next.dumpPeers()), 3);
+
+      // The second's coin is spent: checked, and not saved again.
+      chain.spendCoin(proofs[1].stakes[0].stake.outpoint);
+      release();
+      await loading;
+      assert.strictEqual(next.peers.size, 2);
+      assert.strictEqual(next.unloadedPeers.size, 0);
+      assert.strictEqual(count(next.dumpPeers()), 2);
+    });
+
   describe('Peer selection', function() {
     const slot = (start, score, peerId) => ({start, score, peerId});
 
