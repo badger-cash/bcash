@@ -145,6 +145,53 @@ describe('Avalanche PeerManager', function() {
 
   this.timeout(60000);
 
+  it('should dump its peers and load them, as Bitcoin ABC', async () => {
+    const {chain, clock, pm} = setup();
+    const proofs = [];
+    for (let i = 0; i < 3; i++) {
+      const proof = buildRandomProof(chain, MIN_VALID_PROOF_SCORE);
+      assert((await pm.registerProof(proof))[0]);
+      proofs.push(proof);
+      clock.time += 10;
+    }
+    const first = pm.getPeerByProof(proofs[0].id());
+    assert(pm.setFinalized(first.peerId));
+    first.nextPossibleConflictTime = clock.time + 1234;
+
+    const data = pm.dumpPeers();
+    assert.strictEqual(data.readUInt32LE(0), PeerManager.PEERS_DUMP_VERSION);
+
+    // A new run: all three, as they were, but for one whose coin went.
+    const next = new PeerManager({
+      verifier: pm.verifier,
+      now: () => clock.time + 3600,
+      ms: () => clock.ms
+    });
+    chain.spendCoin(proofs[2].stakes[0].stake.outpoint);
+
+    const loaded = await next.loadPeers(data);
+    assert.deepStrictEqual(loaded.map(p => p.rid()).sort(),
+      proofs.slice(0, 2).map(p => p.rid()).sort());
+
+    for (const proof of proofs.slice(0, 2)) {
+      const before = pm.getPeerByProof(proof.id());
+      const after = next.getPeerByProof(proof.id());
+      assert.strictEqual(after.hasFinalized, before.hasFinalized);
+      assert.strictEqual(after.registrationTime, before.registrationTime);
+      assert.strictEqual(after.nextPossibleConflictTime,
+        before.nextPossibleConflictTime);
+    }
+
+    // Another version, or a damaged file, loads nothing more.
+    const other = Buffer.from(data);
+    other[0] = 2;
+    assert.deepStrictEqual(await new PeerManager({verifier: pm.verifier})
+      .loadPeers(other), []);
+    const cut = await new PeerManager({verifier: pm.verifier})
+      .loadPeers(data.slice(0, data.length - 5));
+    assert.strictEqual(cut.length, 2);
+  });
+
   describe('Peer selection', function() {
     const slot = (start, score, peerId) => ({start, score, peerId});
 

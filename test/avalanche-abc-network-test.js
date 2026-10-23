@@ -11,7 +11,10 @@
  */
 
 const assert = require('bsert');
+const fs = require('fs');
+const path = require('path');
 const FullNode = require('../lib/node/fullnode');
+const PeerManager = require('../lib/avalanche/peermanager');
 const Processor = require('../lib/avalanche/processor');
 const ABCRegtest = require('./util/abc-regtest');
 
@@ -144,5 +147,21 @@ suite(title, function() {
     const peers = await abc.call('getpeerinfo');
     assert.strictEqual(peers.length, 1);
     assert.strictEqual(node.pool.peers.size(), 1);
+  });
+
+  it('should load the avalanche peers Bitcoin ABC saved', async () => {
+    // ABC saves its peers, its own proof among them, as it stops.
+    await abc.stop();
+    const data = fs.readFileSync(path.join(abc.dir, 'regtest',
+      'avapeers.dat'));
+
+    const pm = node.pool.avalanche.peerManager;
+    const fresh = new PeerManager({verifier: pm.verifier});
+    const loaded = await fresh.loadPeers(data);
+
+    assert.deepStrictEqual(loaded.map(p => p.rid()), [proof.rid()]);
+
+    // And what bcash saves, ABC's format, loads the same.
+    assert.bufferEqual(fresh.dumpPeers().slice(0, 16), data.slice(0, 16));
   });
 });

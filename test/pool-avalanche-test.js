@@ -10,6 +10,9 @@
  */
 
 const assert = require('bsert');
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
 const Chain = require('../lib/blockchain/chain');
 const BlockStore = require('../lib/blockstore/level');
 const Pool = require('../lib/net/pool');
@@ -260,6 +263,45 @@ describe('Pool avalanche quorum', function() {
     ava.emit('tx vote', tx, Processor.voteStatus.STALE);
     assert.deepStrictEqual(did, ['marked', 'broadcast', 'watched', 'stale']);
   });
+
+  it('should save avalanche peers at a stop, and load them', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bcash-avapeers-'));
+    try {
+      const file = path.join(dir, 'avapeers.dat');
+      const p = await pool(true);
+      p.options.avaPeersFile = file;
+
+      // No file yet: nothing.
+      let given = null;
+      p.avalanche.loadPeers = async (data) => {
+        given = data;
+        return 1;
+      };
+      await p.loadAvalanchePeers();
+      assert.strictEqual(given, null);
+
+      p.avalanche.peerManager.dumpPeers = () => Buffer.from('peers');
+      await p.dumpAvalanchePeers();
+      assert(!fs.existsSync(file + '.new'));
+      await p.loadAvalanchePeers();
+      assert.bufferEqual(given, Buffer.from('peers'));
+    } finally {
+      fs.rmSync(dir, {recursive: true, force: true});
+    }
+  });
+
+  it('should keep the file in the data directory, unless told not',
+    async () => {
+      const FullNode = require('../lib/node/fullnode');
+      const options = {network: 'regtest', workers: false, avalanche: true};
+      assert.strictEqual(new FullNode({...options, memory: true})
+        .avaPeersFile(), null);
+      const prefix = path.join(os.tmpdir(), 'bcash-avapeers-prefix');
+      assert.strictEqual(new FullNode({...options, memory: false, prefix})
+        .avaPeersFile(), path.join(prefix, 'regtest', 'avapeers.dat'));
+      assert.strictEqual(new FullNode({...options, memory: false, prefix,
+        persistAvapeers: false}).avaPeersFile(), null);
+    });
 
   it('should say NODE_AVALANCHE only when it stakes', async () => {
     const network = Network.get('testnet');
