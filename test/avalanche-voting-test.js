@@ -1524,8 +1524,9 @@ describe('Avalanche vote map order', function() {
       [entries[i], entries[j]] = [entries[j], entries[i]];
     }
 
-    processor.voteRecords = new Map(entries.map(e =>
-      [`${e.type}:${e.hash.toString('hex')}`, e]));
+    const key = e => `${e.type}:${e.hash.toString('hex')}`;
+    for (const e of entries)
+      processor.voteRecords.set(key(e), e);
 
     const sorted = processor.sortedRecords();
 
@@ -1544,6 +1545,21 @@ describe('Avalanche vote map order', function() {
       assert(!lastWork || work.lt(lastWork));
       lastWork = work;
     }
+
+    // Kept until one comes or goes, and then as a new sort would have it.
+    assert.strictEqual(processor.sortedRecords(), sorted);
+    processor.voteRecords.delete(key(sorted[0]));
+    const block = {hash: random.randomBytes(32), chainwork: new BN(1000)};
+    const added = {type: itemTypes.BLOCK, hash: block.hash, item: block,
+      record: new VoteRecord(true)};
+    processor.voteRecords.set(key(added), added);
+
+    const again = processor.sortedRecords();
+    assert.notStrictEqual(again, sorted);
+    assert.strictEqual(again.length, sorted.length);
+    // A proof fewer; the block of most work first among blocks.
+    assert.strictEqual(again[count - 2].type, itemTypes.PROOF);
+    assert.strictEqual(again[count - 1], added);
   });
 });
 
