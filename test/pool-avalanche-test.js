@@ -261,6 +261,25 @@ describe('Pool avalanche quorum', function() {
     assert.deepStrictEqual(did, ['marked', 'broadcast', 'watched', 'stale']);
   });
 
+  it('should say NODE_AVALANCHE only when it stakes', async () => {
+    const network = Network.get('testnet');
+    const chain = new Chain({network, memory: true, spv: true});
+    const peerData = {proof: {id: () => Buffer.alloc(32)}};
+    const full = (more) => {
+      const blocks = new BlockStore({network, memory: true});
+      return new Pool({network, memory: true, avalanche: true,
+        chain: new Chain({network, memory: true, blocks}), ...more});
+    };
+
+    assert.strictEqual(full().options.services & AVALANCHE, 0);
+    assert.strictEqual(full({avalanchePeerData: peerData}).options.services
+      & AVALANCHE, AVALANCHE);
+
+    assert.throws(() => new Pool({network, chain, spv: true, memory: true,
+      avalanche: true, avalanchePeerData: peerData}),
+    {message: 'An SPV node cannot stake.'});
+  });
+
   it('should poll filter aware on SPV only', async () => {
     assert((await spvPool()).avalanche.filterAwarePolling);
     assert(!(await pool(true)).avalanche.filterAwarePolling);
