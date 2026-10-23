@@ -169,6 +169,40 @@ describe('Pool avalanche addresses', function() {
       assert(p.avalancheHosts.has('51.255.199.40:18333'));
     });
 
+  it('should take a discouraged peer only while slots are left',
+    async () => {
+      const p = await pool(true);
+      p.discouraged.add('51.255.199.50');
+      let added = 0;
+      p.addInbound = () => {
+        added += 1;
+      };
+      const socket = ip => ({
+        remoteAddress: ip,
+        remotePort: 40000,
+        destroyed: false,
+        destroy() {
+          this.destroyed = true;
+        }
+      });
+
+      p.options.maxInbound = 8;
+      p.peers.inbound = 0;
+      const early = socket('51.255.199.50');
+      p.handleSocket(early);
+      assert(!early.destroyed);
+
+      // One slot left: not the discouraged, still others.
+      p.peers.inbound = 7;
+      const late = socket('51.255.199.50');
+      p.handleSocket(late);
+      assert(late.destroyed);
+      const other = socket('51.255.199.51');
+      p.handleSocket(other);
+      assert(!other.destroyed);
+      assert.strictEqual(added, 2);
+    });
+
   it('should discourage, not ban, as Bitcoin ABC', async () => {
     const p = await pool(true);
     await p.handleAddr(fakePeer, new packets.AddrPacket([
