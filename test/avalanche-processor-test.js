@@ -538,4 +538,77 @@ describe('Avalanche Processor', function() {
     await processor.handlePacket(peer, unknown('avaproof', Buffer.from([1])));
     assert.strictEqual(peer.ban, 100);
   });
+
+  // Bitcoin ABC's PROOF_REQUEST_PARAMS.
+  it('should keep and ask for so many of a peer\'s proofs', async () => {
+    const peer = await connect(new FakePeer(1));
+    const ids = [];
+    for (let i = 0; i < 5100; i++)
+      ids.push(random.randomBytes(32));
+
+    processor.handleProofInv(peer, ids);
+
+    // 5000 kept; 100 asked for, in one getdata.
+    assert.strictEqual(processor.requests.size, 5000);
+    const getdatas = peer.sent.filter(p => p.cmd === 'getdata');
+    assert.strictEqual(getdatas.length, 1);
+    assert.strictEqual(getdatas[0].items.length, 100);
+
+    // Unanswered: asked of nobody else, so dropped; room for the next.
+    peer.sent = [];
+    now += 60;
+    processor.expireProofRequests();
+    assert.strictEqual(processor.requests.size, 4900);
+    assert.strictEqual(peer.sent.filter(p => p.cmd === 'getdata')[0]
+      .items.length, 100);
+
+    // Gone: nothing left of it.
+    processor.removePeer(peer);
+    assert.strictEqual(processor.requests.size, 0);
+  });
+
+  it('should refuse a proof that cannot be valid, before its coins',
+    async () => {
+      const peer = await connect(new FakePeer(1));
+      const proof = stakingProof();
+      let checked = 0;
+      pm.verifier.verify = async () => {
+        checked += 1;
+        return [true, 'valid'];
+      };
+      proof.signature = Buffer.alloc(64);
+
+      assert.strictEqual(await processor.receivedProof(
+        processor.peers.get(peer.id), proof), false);
+      assert.strictEqual(checked, 0);
+      assert(processor.alreadyHaveProof(proof.id()));
+    });
+
+  it('should check so many of a peer\'s proofs at once', async () => {
+    const peer = await connect(new FakePeer(1));
+    const state = processor.peers.get(peer.id);
+
+    // Coins that take their time.
+    let release;
+    const held = new Promise(r => (release = r));
+    let checked = 0;
+    pm.verifier.verify = async () => {
+      checked += 1;
+      await held;
+      return [false, 'utxo-missing-or-spent'];
+    };
+
+    const pending = [];
+    for (let i = 0; i < 101; i++)
+      pending.push(processor.receivedProof(state, stakingProof()));
+
+    await new Promise(r => setImmediate(r));
+    assert.strictEqual(state.verifyingProofs, 100);
+    assert.strictEqual(checked, 1);
+
+    release();
+    await Promise.all(pending);
+    assert.strictEqual(state.verifyingProofs, 0);
+    assert.strictEqual(checked, 100);
+  });
 });
