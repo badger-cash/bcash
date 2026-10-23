@@ -33,9 +33,13 @@ process.on('unhandledRejection', (err, promise) => {
   throw err;
 });
 
-process.on('SIGINT', async () => {
-  await node.close();
-});
+// systemd and kill stop with SIGTERM: close as on ^C, saving what the
+// node keeps across a restart.
+for (const signal of ['SIGINT', 'SIGTERM']) {
+  process.on(signal, async () => {
+    await node.close();
+  });
+}
 
 (async () => {
   await node.ensure();
