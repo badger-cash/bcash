@@ -594,7 +594,9 @@ describe('Avalanche Processor', function() {
       assert(processor.alreadyHaveProof(proof.id()));
     });
 
-  it('should check so many of a peer\'s proofs at once', async () => {
+  it('should check so many of a peer\'s proofs at once', async function() {
+    // 101 signed proofs: slow on the JavaScript backend.
+    this.timeout(60000);
     const peer = await connect(new FakePeer(1));
     const state = processor.peers.get(peer.id);
 
