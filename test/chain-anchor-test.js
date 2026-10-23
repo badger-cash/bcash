@@ -36,11 +36,11 @@ const MAINNET = [
   { height: 971522, hash: '000000000000000035265eb26ea436af88b59b40183141a73caf41a795a0f57d',
     header: '00800236e22b856b931552f832d0bf40e48a482c903231f00186f5810000000000000000f39b52e4338a42060fcad58024d99a0477c5c0d75589d8d19ede7a6e798f5a61623dd46ad6c200193e8f85a4' },
   { height: 971523, hash: '0000000000000000ac805f618b511645b8be7c0338c73d454e6bc1bd3265480e',
-    header: '00e012207df5a095a741af3ca7413118409bb588af36a46eb25e26350000000000000000d3d6d2c46dcf8debd00f6466f520afab8ea2fdf3ef1cca0c7f5333a8a5e1d6b0a73dd46a1fc300194845b847' },
+    header: '00e012207df5a095a741af3ca7413118409bb588af36a46eb25e26350000000000000000d3d6d2c46dcf8debd00f6466f520afab8ea2fdf3ef1cca0c7f5333a8a5e1d6b0a73dd46a1fc300194845b847' }
 ];
 
-const raw = (hex) => Buffer.from(hex, 'hex');
-const headerBlock = (header) => Block.fromRaw(Buffer.concat([header, Buffer.from([0])]));
+const raw = hex => Buffer.from(hex, 'hex');
+const headerBlock = header => Block.fromRaw(Buffer.concat([header, Buffer.from([0])]));
 
 describe('Chain anchor', function() {
   this.timeout(20000);

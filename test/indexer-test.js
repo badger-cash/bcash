@@ -46,7 +46,6 @@ const vectors = [
   }
 ];
 
-
 const workers = new WorkerPool({
   enabled: true,
   size: 2

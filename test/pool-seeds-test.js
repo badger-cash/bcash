@@ -26,7 +26,9 @@ async function freshPool(type, resolve) {
   pool.hosts.resolve = resolve;
   // Record refills instead of dialling anyone.
   pool.refills = 0;
-  pool.refill = () => { pool.refills++; };
+  pool.refill = () => {
+ pool.refills++;
+};
   await pool.hosts.open();
   return {chain, pool};
 }

@@ -132,7 +132,9 @@ describe('Obolensky', function() {
 
       it('accepts the real activation block, matching its checkpoint', async () => {
         let hit = null;
-        chain.once('checkpoint', (hash, height) => { hit = height; });
+        chain.once('checkpoint', (hash, height) => {
+ hit = height;
+});
         const entry = await chain.add(toBlock(window.headers[12][1]), common.flags.VERIFY_POW);
         assert(entry);
         assert.strictEqual(entry.height, expectHeight);

@@ -100,7 +100,6 @@ async function getMockBlock(chain, txs = [], cb = true) {
   return block;
 }
 
-
 describe('Mempool', function() {
   this.timeout(5000);
 

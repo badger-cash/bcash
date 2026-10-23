@@ -35,7 +35,6 @@ const workers = new WorkerPool({
   size: 2
 });
 
-
 const blocks = new BlockStore({
   memory: true,
   network
@@ -59,7 +58,6 @@ const cpu = miner.cpu;
 const wallet = new MemWallet({
   network
 });
-
 
 let tip1 = null;
 let tip2 = null;

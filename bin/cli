@@ -6,4 +6,3 @@ console.error('%s%s',
   'Warning: The `bcash cli` interface is deprecated.\n',
   'Please use `bcash-cli` and `bwallet-cli` instead.');
 
-
