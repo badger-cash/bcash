@@ -229,6 +229,25 @@ describe('Avalanche SpvStakeVerifier', function() {
     const {proof} = setup({amount: amount + 1});
     assert.deepStrictEqual(await verifier.verify(proof),
       [false, 'amount-mismatch']);
+
+    // Not its coin: neither kept nor watched, so fetched again.
+    assert.strictEqual(pool.watched.length, 0);
+    assert.strictEqual(verifier.coins.size, 0);
+    await verifier.verify(proof);
+    assert.deepStrictEqual(pool.scans, ['merkle', 'merkle']);
+  });
+
+  it('should keep the coins of a proof that will mature', async () => {
+    const {proof} = setup();
+    verifier.confirmations = 5000;
+    assert.deepStrictEqual(await verifier.verify(proof),
+      [false, 'immature-utxo']);
+    assert.strictEqual(pool.watched.length, 1);
+
+    // Mature: no fetch again.
+    verifier.confirmations = 1;
+    assert.deepStrictEqual(await verifier.verify(proof), [true, 'valid']);
+    assert.deepStrictEqual(pool.scans, ['merkle']);
   });
 
   it('should not find a stake beyond its headers, but try again', async () => {
