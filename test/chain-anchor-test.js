@@ -346,6 +346,42 @@ describe('Chain anchor', function() {
       }
     });
 
+    it('reopens with no anchor given, from the database\'s own', async () => {
+      await (await open({...trusted, getHeaders: async () => headers})).close();
+
+      const chain = await open(undefined);
+      try {
+        // Where the database starts: what an anchor given again would be.
+        const height = TRUSTED - COUNT + 1;
+        assert.strictEqual(chain.options.anchor.height, height);
+        assert.strictEqual(chain.options.anchor.hash, rhash(headers[0]));
+        assert.strictEqual(chain.tip.rhash(), trusted.hash);
+
+        // Its locator stops there, as it does anchored.
+        const locator = await chain.getLocator();
+        const last = locator[locator.length - 1];
+        assert.strictEqual(Buffer.from(last).reverse().toString('hex'),
+          rhash(headers[0]));
+      } finally {
+        await chain.close();
+      }
+    });
+
+    it('reopens a database from genesis as before', async () => {
+      const fresh = new Chain({network, spv: true, memory: false, prefix});
+      await fresh.open();
+      await fresh.close();
+
+      const chain = new Chain({network, spv: true, memory: false, prefix});
+      await chain.open();
+      try {
+        assert.strictEqual(chain.options.anchor, null);
+        assert.strictEqual(chain.height, 0);
+      } finally {
+        await chain.close();
+      }
+    });
+
     it('refuses to reopen a database from another anchor', async () => {
       await (await open({...trusted, getHeaders: async () => headers})).close();
 
