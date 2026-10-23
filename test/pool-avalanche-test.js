@@ -91,6 +91,41 @@ describe('Pool avalanche addresses', function() {
     assert(!p.hosts.map.has('51.255.199.26:18333'));
   });
 
+  it('should dial first the avalanche nodes most peers list', async () => {
+    const p = await pool(true);
+
+    // A full host list takes no more: these are kept apart.
+    p.hosts.add = () => false;
+
+    const most = '51.255.199.30:18333';
+    const fewer = '51.255.199.31:18333';
+    for (let id = 1; id <= 3; id++) {
+      const items = [addr('51.255.199.30', NETWORK | AVALANCHE)];
+      if (id === 1)
+        items.push(addr('51.255.199.31', NETWORK | AVALANCHE));
+      // Not ours to dial: off the default port, or not avalanche.
+      const off = NetAddress.fromHostname('51.255.199.32:51234', 'testnet');
+      off.services = AVALANCHE;
+      off.time = items[0].time;
+      items.push(off, addr('51.255.199.33', NETWORK));
+      await p.handleAddr({...fakePeer, id}, new packets.AddrPacket(items));
+    }
+
+    assert.strictEqual(p.avalancheHosts.size, 2);
+    assert.strictEqual(p.getAvalancheHost().hostname, most);
+    assert.strictEqual(p.getAvalancheHost().hostname, fewer);
+
+    // Tried: not again for 10 minutes.
+    assert.strictEqual(p.getAvalancheHost(), null);
+    p.avalancheHosts.get(most).tried -= 601;
+    assert.strictEqual(p.getAvalancheHost().hostname, most);
+
+    // Nor once trimmed.
+    p.avalancheHosts.get(most).tried -= 601;
+    p.trimmed.add(most);
+    assert.strictEqual(p.getAvalancheHost(), null);
+  });
+
   it('should discourage, not ban, as Bitcoin ABC', async () => {
     const p = await pool(true);
     await p.handleAddr(fakePeer, new packets.AddrPacket([
