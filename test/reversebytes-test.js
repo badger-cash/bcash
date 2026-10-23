@@ -276,7 +276,8 @@ describe('OP_REVERSEBYTES', function() {
         assert.strictEqual(run(s).getBool(-1), true, `run ${i + 1}`);
     });
 
-    it('a sliced operand does not reach back into the buffer it came from', () => {
+    it('a sliced operand does not reach back into the buffer it came from',
+      () => {
       // The covenant pattern: a large element is split and one piece reversed.
       const blob = Buffer.concat([
         Buffer.from('0000000000000000', 'hex'),
@@ -328,7 +329,8 @@ describe('OP_REVERSEBYTES', function() {
 
     it('verifies the same bare script twice, cached and refreshed', () => {
       const input = script(Buffer.from('beef', 'hex'));
-      const output = script('reversebytes', Buffer.from('efbe', 'hex'), 'equal');
+      const output = script('reversebytes', Buffer.from('efbe', 'hex'),
+        'equal');
       const {prev, tx} = spend(input, output);
       const flag = flags.STANDARD_VERIFY_FLAGS;
 
@@ -342,7 +344,8 @@ describe('OP_REVERSEBYTES', function() {
     });
 
     it('verifies a P2SH redeem twice without altering the input script', () => {
-      const redeem = script('reversebytes', Buffer.from('efbe', 'hex'), 'equal');
+      const redeem = script('reversebytes', Buffer.from('efbe', 'hex'),
+        'equal');
       const output = Script.fromScripthash(redeem.hash160());
       const input = script(Buffer.from('beef', 'hex'), redeem.toRaw());
       const {prev, tx} = spend(input, output);
@@ -360,7 +363,8 @@ describe('OP_REVERSEBYTES', function() {
       Script.verify(input, null, output, tx, 0, 0, flag);
     });
 
-    it('rejects the palindrome idiom on a non-palindrome in a P2SH spend', () => {
+    it('rejects the palindrome idiom on a non-palindrome in a P2SH spend',
+      () => {
       const redeem = script('dup', 'reversebytes', 'equal');
       const output = Script.fromScripthash(redeem.hash160());
       const input = script(Buffer.from('beef', 'hex'), redeem.toRaw());
@@ -368,7 +372,8 @@ describe('OP_REVERSEBYTES', function() {
 
       let err = null;
       try {
-        Script.verify(input, null, output, tx, 0, 0, flags.STANDARD_VERIFY_FLAGS);
+        Script.verify(input, null, output, tx, 0, 0,
+          flags.STANDARD_VERIFY_FLAGS);
       } catch (e) {
         err = e;
       }

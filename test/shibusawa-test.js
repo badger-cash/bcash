@@ -113,17 +113,20 @@ describe('Shibusawa', function() {
     stack.push(max.toRaw());
     stack.push(one.toRaw());
 
-    isError(stack, Script.fromString('OP_ADD'), '64 bit ScriptNumber overflow.', true);
+    isError(stack, Script.fromString('OP_ADD'),
+      '64 bit ScriptNumber overflow.', true);
   });
 
-  it('should throw error if 64 bit integer addition overflows with negative number', async () => {
+  it('should throw error if 64 bit integer addition overflows with negative n' +
+    'umber', async () => {
     const min = ScriptNum.from('-9223372036854775807');
     const negOne = ScriptNum.from('-1');
     const stack = new Stack();
     stack.push(min.toRaw());
     stack.push(negOne.toRaw());
 
-    isError(stack, Script.fromString('OP_ADD'), '64 bit ScriptNumber overflow.', true);
+    isError(stack, Script.fromString('OP_ADD'),
+      '64 bit ScriptNumber overflow.', true);
   });
 
   it('should throw error if 64 bit integer subtraction overflows', async () => {
@@ -133,17 +136,20 @@ describe('Shibusawa', function() {
     stack.push(min.toRaw());
     stack.push(one.toRaw());
 
-    isError(stack, Script.fromString('OP_SUB'), '64 bit ScriptNumber overflow.', true);
+    isError(stack, Script.fromString('OP_SUB'),
+      '64 bit ScriptNumber overflow.', true);
   });
 
-  it('should throw error if 64 bit integer subtraction overflows with negative number', async () => {
+  it('should throw error if 64 bit integer subtraction overflows with negativ' +
+    'e number', async () => {
     const max = ScriptNum.from('9223372036854775807');
     const negOne = ScriptNum.from('-1');
     const stack = new Stack();
     stack.push(max.toRaw());
     stack.push(negOne.toRaw());
 
-    isError(stack, Script.fromString('OP_SUB'), '64 bit ScriptNumber overflow.', true);
+    isError(stack, Script.fromString('OP_SUB'),
+      '64 bit ScriptNumber overflow.', true);
   });
 
   it('should throw error if 0 + -9223372036854775808', async () => {

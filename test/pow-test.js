@@ -69,7 +69,8 @@ describe('Difficulty', function() {
     prev.height = 1;
     const first = new ChainEntry();
     first.time = 1602486750;
-    assert.strictEqual(await chain.getASERTTarget(first.time, prev), 0x1d00ffff);
+    assert.strictEqual(await chain.getASERTTarget(first.time, prev),
+      0x1d00ffff);
   });
 
   it('should get next work lower limit actual', async () => {

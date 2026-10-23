@@ -103,7 +103,7 @@
     "browserify": "browserify -s bcoin lib/bcoin-browser.js | uglifyjs -c > bcoin.js",
     "clean": "rm -f {browser/,}{bcoin.js,bcoin-worker.js,app.js,worker.js}",
     "docs": "jsdoc -c jsdoc.json",
-    "lint": "eslint $(cat .eslintfiles) || exit 0",
+    "lint": "eslint $(cat .eslintfiles)",
     "lint-ci": "eslint $(cat .eslintfiles)",
     "lint-file": "eslint",
     "test": "bmocha --reporter spec test/*.js",
