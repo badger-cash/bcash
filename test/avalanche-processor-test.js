@@ -539,6 +539,16 @@ describe('Avalanche Processor', function() {
     assert.strictEqual(peer.ban, 100);
   });
 
+  it('should not hold our own failures against a peer', async () => {
+    const peer = await connect(new FakePeer(1));
+    processor.receivedProof = async () => {
+      throw new Error('Database is closed.');
+    };
+    const proof = stakingProof();
+    await processor.handlePacket(peer, unknown('avaproof', proof.toRaw()));
+    assert.strictEqual(peer.ban, 0);
+  });
+
   // Bitcoin ABC's PROOF_REQUEST_PARAMS.
   it('should keep and ask for so many of a peer\'s proofs', async () => {
     const peer = await connect(new FakePeer(1));
