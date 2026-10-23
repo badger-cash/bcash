@@ -21,7 +21,6 @@ const Block = require('../lib/primitives/block');
 const Network = require('../lib/protocol/network');
 const consensus = require('../lib/protocol/consensus');
 const common = require('../lib/blockchain/common');
-const hash256 = require('bcrypto/lib/hash256');
 
 const network = Network.get('main');
 
@@ -156,7 +155,6 @@ describe('Chain anchor', function() {
       randomBytes(32).copy(header, 36);
       header.writeUInt32LE(time, 68);
       header.writeUInt32LE(bits, 72);
-      const target = consensus.fromCompact(bits);
       for (let nonce = 0; ; nonce++) {
         header.writeUInt32LE(nonce, 76);
         const block = headerBlock(header);

@@ -19,7 +19,6 @@ const Outpoint = require('../lib/primitives/outpoint');
 const Script = require('../lib/script/script');
 const HD = require('../lib/hd');
 const Wallet = require('../lib/wallet/wallet');
-const {BufferMap} = require('buffer-map');
 const nodejsUtil = require('util');
 
 const KEY1 = 'xprv9s21ZrQH143K3Aj6xQBymM31Zb4BVc7wxqfUhMZrzewdDVCt'
@@ -587,7 +586,7 @@ describe('Wallet', function() {
    let conflict = 0;
 
    wallet.on('conflict', () => {
-	   conflict += 1;
+     conflict += 1;
    });
 
    const txb = new MTX();
@@ -608,8 +607,8 @@ describe('Wallet', function() {
    await assert.rejects(async () => {
       await wdb.addBlock(entry, [txb.toTX()]);
    }, {
-	name: 'Error',
-	message: 'Unexpected interrupt.'
+  name: 'Error',
+  message: 'Unexpected interrupt.'
   });
 
    wallet.txdb.removeConflict = removeConflict;

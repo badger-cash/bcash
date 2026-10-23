@@ -6,21 +6,9 @@
 const Logger = require('blgr');
 const bio = require('bufio');
 const assert = require('bsert');
-const common = require('./util/common');
-const {resolve} = require('path');
 const fs = require('bfile');
 const {rimraf, testdir} = require('./util/common');
 const random = require('bcrypto/lib/random');
-
-const vectors = [
-  common.readBlock('block300025'),
-  common.readBlock('block426884'),
-  common.readBlock('block898352')
-];
-
-const undos = [
-  common.readBlock('block300025')
-];
 
 const {
   AbstractBlockStore,

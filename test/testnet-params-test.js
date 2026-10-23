@@ -25,7 +25,11 @@ const testnet = Network.get('testnet');
 const toBlock = hex => Block.fromRaw(Buffer.concat([Buffer.from(hex, 'hex'), Buffer.from([0])]));
 const rhash = buf => Buffer.from(buf).reverse().toString('hex');
 
-/** Anchor an SPV testnet chain on a window's first 12 headers. */
+/**
+ * Anchor an SPV testnet chain on a window's first 12 headers.
+ * @param {Object} window - {start, headers}.
+ * @returns {Promise} - Returns {@link Chain}.
+ */
 async function openAnchored(window) {
   const chain = new Chain({
     network: testnet, memory: true, spv: true,
@@ -38,7 +42,12 @@ async function openAnchored(window) {
   return chain;
 }
 
-/** Add the rest of a window's headers; returns the first failure, if any. */
+/**
+ * Add the rest of a window's headers.
+ * @param {Chain} chain - From openAnchored.
+ * @param {Object} window - {start, headers}.
+ * @returns {Promise} - Returns the first failure, if any.
+ */
 async function addRest(chain, window) {
   for (let i = 12; i < window.headers.length; i++) {
     const [hash, header] = window.headers[i];

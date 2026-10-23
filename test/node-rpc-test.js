@@ -6,7 +6,6 @@
 const assert = require('bsert');
 const FullNode = require('../lib/node/fullnode');
 const NodeClient = require('../lib/client/node');
-const KeyRing = require('../lib/primitives/keyring');
 
 const ports = {
   p2p: 49331,
@@ -67,14 +66,18 @@ describe('RPC', function() {
       const {chain} = await nclient.getInfo();
       const info = await nclient.execute('getblock', [chain.tip]);
 
+      // No segwit: no strippedsize or weight, as Bitcoin ABC's.
       const properties = [
-        'hash', 'confirmations', 'strippedsize',
-        'size', 'weight', 'height', 'version',
+        'hash', 'confirmations',
+        'size', 'height', 'version',
         'versionHex', 'merkleroot', 'coinbase',
         'tx', 'time', 'mediantime', 'nonce',
         'bits', 'difficulty', 'chainwork',
         'nTx', 'previousblockhash', 'nextblockhash'
       ];
+
+      for (const property of properties)
+        assert(property in info, property);
 
       assert.deepEqual(chain.height, info.height);
       assert.deepEqual(chain.tip, info.hash);

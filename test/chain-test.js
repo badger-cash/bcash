@@ -16,7 +16,6 @@ const MemWallet = require('./util/memwallet');
 const Network = require('../lib/protocol/network');
 const Output = require('../lib/primitives/output');
 const common = require('../lib/blockchain/common');
-const util = require('../lib/utils/util');
 const nodejsUtil = require('util');
 const Opcode = require('../lib/script/opcode');
 const KeyRing = require('../lib/primitives/keyring');

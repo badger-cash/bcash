@@ -9,8 +9,6 @@ const Script = require('../lib/script/script');
 const Stack = require('../lib/script/stack');
 const ScriptNum = require('../lib/script/scriptnum');
 
-const EMPTY = Buffer.alloc(0);
-
 const flags = [
   common.flags.VERIFY_NONE,
   common.flags.STANDARD_VERIFY_FLAGS,
