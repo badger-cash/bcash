@@ -1664,6 +1664,48 @@ describe('Avalanche unanimous votes below the connected ratio', function() {
   });
 });
 
+// bcash keeps its finalized tip across a restart, where Bitcoin ABC does
+// not: at its first quorum it polls its tip again, final or not, so that
+// pre-consensus need not wait for the next block.
+describe('Avalanche pre-consensus after a restart', function() {
+  const {BLOCK} = itemTypes;
+
+  it('should poll its final tip again at quorum, and begin', async () => {
+    const setup = new Setup();
+    const {processor} = setup;
+    const tip = setup.chain.mine();
+
+    // As after a restart: the tip final already.
+    processor.finalizationTip = tip;
+    assert(!await processor.isWorthPolling(BLOCK, tip));
+    assert(!processor.isPreconsensusActivated());
+
+    await setup.connectNodes();
+    assert(processor.isQuorumEstablished());
+    await new Promise(r => setImmediate(r));
+    assert(processor.voteRecords.has(`${BLOCK}:${tip.hash.toString('hex')}`));
+
+    for (let i = 0; i < 20 * FINALIZATION_SCORE; i++) {
+      const round = setup.getRound();
+      await setup.runEventLoop();
+      if (setup.getRound() === round)
+        continue;
+      const {nodeId} = [...processor.queries.values()]
+        .find(q => q.round === round);
+      const r = await setup.registerVotes(nodeId,
+        new Response(round, 0, [new Vote(0, tip.hash)]));
+      if (r.updates.some(u => u.status === voteStatus.FINALIZED))
+        break;
+    }
+
+    assert(processor.isPreconsensusActivated());
+    assert.strictEqual(processor.recheckTip, null);
+    // Still final, and not polled again.
+    assert.strictEqual(processor.finalizationTip, tip);
+    assert(!await processor.isWorthPolling(BLOCK, tip));
+  });
+});
+
 // For SPV nodes, with few nodes: poll only nodes whose vote counts, as
 // Bitcoin ABC counts a node's vote once in any 8.
 describe('Avalanche filter aware polling', function() {
