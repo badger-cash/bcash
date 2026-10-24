@@ -121,5 +121,9 @@
   },
   "resolutions": {
     "nan": "^2.23.0"
+  },
+  "optionalDependencies": {
+    "@fails-components/webtransport": "1.6.11",
+    "@fails-components/webtransport-transport-http3-quiche": "1.6.11"
   }
 }
