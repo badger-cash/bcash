@@ -126,9 +126,10 @@
 
     <script>
       // bcash's SPV node in the page, with no proxy: the chain in
-      // IndexedDB, peers bcash full nodes over WebTransport, found from the
-      // network's seeds and remembered for the next visit. ?network=
-      // picks the network (testnet by default).
+      // IndexedDB, started at the newest checkpoint built into bcash, peers
+      // bcash full nodes over WebTransport, found from the network's seeds
+      // and remembered for the next visit. ?network= picks the network
+      // (testnet by default).
       (async () => {
         const $ = id => document.getElementById(id);
         const lines = [];
@@ -195,9 +196,14 @@
               + ' is not served over HTTPS.');
           }
 
+          // Its own database per anchor: a chain kept from another start
+          // cannot be reopened at this one.
+          const anchor = bcash.newestCheckpoint(network);
+
           const node = new bcash.SPVNode({
             network,
-            prefix: '/bcash',
+            prefix: `/bcash/anchor-${anchor.height}`,
+            anchor,
             memory: false,
             workers: false,
             logConsole: false,
@@ -255,15 +261,23 @@
           chain.on('full', () => print('Synced: following the tip now.'));
 
           setState('Opening the chain.',
-            'Reading blocks kept in this browser (IndexedDB).');
+            `Starting at checkpoint ${num(anchor.height)}, built into this`
+            + ' bcash: the chain kept in this browser, or on a first visit'
+            + ' its headers from a node.');
+          print(`Starting from checkpoint ${num(anchor.height)}`
+            + ` (${anchor.hash.slice(0, 16)}...), built into this bcash:`
+            + ' every header after it is checked; nothing before it is'
+            + ' fetched.');
 
+          const opening = Date.now();
           await node.open();
 
           const start = chain.height;
           const began = Date.now();
-          print(start > 0
+          print(start > anchor.height
             ? `Opened the chain kept in this browser, at height ${num(start)}.`
-            : 'No chain kept in this browser yet: starting from genesis.');
+            : `Chain anchored at ${num(anchor.height)} in`
+              + ` ${duration((began - opening) / 1000)}.`);
 
           const known = pool.wtHosts.size;
           const seeds = pool.wtDomainSeeds.map(s => s.addr.hostname);
@@ -329,7 +343,8 @@
             }
 
             const blockRate = rate(blocks);
-            const pct = best > 0 ? height / best : 0;
+            const span = best - anchor.height;
+            const pct = span > 0 ? (height - anchor.height) / span : 0;
             $('bar').style.width = `${(pct * 100).toFixed(2)}%`;
 
             let state;
@@ -380,7 +395,8 @@
               ['Network', network],
               ['Height', `${num(height)} (block of ${tipTime})`],
               ['Best known', `${num(best)}, from peers`],
-              ['Progress', `${(pct * 100).toFixed(2)}%, `
+              ['Anchor', `checkpoint ${num(anchor.height)}, built in`],
+              ['Progress', `${(pct * 100).toFixed(2)}% from the anchor, `
                 + `${num(left)} blocks to go`],
               ['Rate', blockRate > 0
                 ? `${Math.round(blockRate)} blocks/s (last minute)`

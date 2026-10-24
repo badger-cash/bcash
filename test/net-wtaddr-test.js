@@ -340,6 +340,42 @@ describe('wtaddr', function() {
 
           assert(await until(() => spv.chain.height === 20));
           assert.deepStrictEqual(dials, [[self, true]]);
+
+          await spv.close();
+          spv = null;
+
+          // Anchored, as a page at a checkpoint: a first visit fetches the
+          // anchor's headers through the seed, before the pool opens, and
+          // nothing below it.
+          const more = await full.rpc.call({
+            method: 'generatetoaddress',
+            params: [20, address]
+          }, {});
+          assert(!more.error);
+
+          kept.data = null;
+          dials.length = 0;
+          const hash = await full.chain.getHash(30);
+          spv = new SPVNode({
+            network: 'regtest',
+            memory: true,
+            workers: false,
+            httpPort: base + 6,
+            webTransport,
+            wtStore,
+            wtSeeds: [`localhost:${base + 3}`],
+            anchor: {height: 30, hash: Buffer.from(hash).reverse()
+              .toString('hex')}
+          });
+          await spv.open();
+          assert.strictEqual(spv.chain.height, 30);
+          assert.deepStrictEqual(dials[0], [`localhost:${base + 3}`, false]);
+
+          await spv.connect();
+          spv.startSync();
+
+          assert(await until(() => spv.chain.height === 40));
+          assert.strictEqual(await spv.chain.getEntry(10), null);
         } finally {
           if (spv)
             await spv.close();

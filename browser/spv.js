@@ -28,6 +28,25 @@ exports.TX = require('../lib/primitives/tx');
 exports.MTX = require('../lib/primitives/mtx');
 
 /**
+ * The newest checkpoint built into bcash for a network, as an anchor for
+ * the SPV node: a page starts its chain there, not at genesis. It trusts
+ * the checkpoint as it trusts this code, which carries it; every header
+ * after it is checked.
+ * @param {String} network
+ * @returns {Object} {height, hash (as displayed)}
+ */
+
+exports.newestCheckpoint = function newestCheckpoint(network) {
+  const {checkpointMap} = exports.Network.get(network);
+  const height = Math.max(...Object.keys(checkpointMap).map(Number));
+
+  return {
+    height,
+    hash: Buffer.from(checkpointMap[height]).reverse().toString('hex')
+  };
+};
+
+/**
  * Keep the WebTransport nodes a page learned in localStorage, for the
  * pool's wtStore: a page that comes back starts from them.
  * @param {String} key
