@@ -5,39 +5,195 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>bcash SPV</title>
     <style>
+      :root {
+        --fg: #111;
+        --muted: #666;
+        --bg: #fff;
+        --panel: #f4f4f4;
+        --bar: #2a7;
+        --warn: #b60;
+        --err: #c22;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --fg: #e6e6e6;
+          --muted: #999;
+          --bg: #121212;
+          --panel: #1e1e1e;
+          --bar: #3c9;
+          --warn: #e93;
+          --err: #f66;
+        }
+      }
       body {
         margin: 16px;
         font: 14px/1.5 monospace;
-        color: #111;
-        background: #fff;
+        color: var(--fg);
+        background: var(--bg);
+      }
+      h1 {
+        margin: 0 0 8px;
+        font-size: 1.4em;
+      }
+      h2 {
+        margin: 20px 0 6px;
+        font-size: 1em;
+        color: var(--muted);
+      }
+      #state {
+        font-size: 1.1em;
+        margin: 0 0 4px;
+      }
+      #detail {
+        color: var(--muted);
+        margin: 0 0 12px;
+      }
+      .bar {
+        height: 10px;
+        background: var(--panel);
+        border-radius: 5px;
+        overflow: hidden;
+        max-width: 640px;
+      }
+      .bar > div {
+        height: 100%;
+        width: 0;
+        background: var(--bar);
+        transition: width 0.5s;
+      }
+      dl {
+        display: grid;
+        grid-template-columns: max-content 1fr;
+        gap: 2px 16px;
+        margin: 12px 0 0;
+        max-width: 640px;
+      }
+      dt {
+        color: var(--muted);
+      }
+      dd {
+        margin: 0;
+        overflow-wrap: anywhere;
+      }
+      table {
+        border-collapse: collapse;
+        max-width: 100%;
+      }
+      td, th {
+        text-align: left;
+        padding: 2px 12px 2px 0;
+        vertical-align: top;
+      }
+      th {
+        color: var(--muted);
+        font-weight: normal;
       }
       pre {
+        margin: 0;
+        padding: 8px;
+        background: var(--panel);
         white-space: pre-wrap;
-        word-break: break-all;
+        overflow-wrap: anywhere;
+        max-height: 50vh;
+        overflow-y: auto;
+      }
+      .warn {
+        color: var(--warn);
+      }
+      .err {
+        color: var(--err);
       }
     </style>
     <script src="bcash-spv.js"></script>
   </head>
   <body>
     <h1>bcash SPV</h1>
-    <p id="state">Loading.</p>
+    <p id="state">Loading bcash.</p>
+    <p id="detail"></p>
+    <div class="bar"><div id="bar"></div></div>
+    <dl id="stats"></dl>
+
+    <h2>Peers</h2>
+    <table>
+      <thead>
+        <tr><th>Node</th><th>How</th><th>State</th><th>Agent</th></tr>
+      </thead>
+      <tbody id="peers"></tbody>
+    </table>
+
+    <h2>Events</h2>
     <pre id="log"></pre>
+
     <script>
       // bcash's SPV node in the page, with no proxy: the chain in
       // IndexedDB, peers bcash full nodes over WebTransport, found from the
       // network's seeds and remembered for the next visit. ?network=
       // picks the network (testnet by default).
       (async () => {
-        const state = document.getElementById('state');
-        const log = document.getElementById('log');
-        const print = (msg) => {
-          log.textContent = `${new Date().toISOString()} ${msg}\n`
-            + log.textContent.slice(0, 20000);
+        const $ = id => document.getElementById(id);
+        const lines = [];
+
+        const time = () => new Date().toISOString().slice(11, 19);
+        const print = (msg, cls) => {
+          lines.unshift({text: `${time()} ${msg}`, cls});
+          lines.length = Math.min(lines.length, 300);
+          $('log').replaceChildren(...lines.map(({text, cls}) => {
+            const div = document.createElement('div');
+            div.textContent = text;
+            if (cls)
+              div.className = cls;
+            return div;
+          }));
+        };
+
+        const setState = (state, detail = '') => {
+          $('state').textContent = state;
+          $('detail').textContent = detail;
+        };
+
+        const duration = (secs) => {
+          if (!isFinite(secs) || secs < 0)
+            return 'unknown';
+          secs = Math.round(secs);
+          const d = Math.floor(secs / 86400);
+          const h = Math.floor(secs % 86400 / 3600);
+          const m = Math.floor(secs % 3600 / 60);
+          const s = secs % 60;
+          if (d > 0)
+            return `${d}d ${h}h`;
+          if (h > 0)
+            return `${h}h ${m}m`;
+          if (m > 0)
+            return `${m}m ${s}s`;
+          return `${s}s`;
+        };
+
+        const num = n => n.toLocaleString('en-US');
+
+        // Rate over the last minute, from [ms, value] samples.
+        const rate = (samples) => {
+          if (samples.length < 2)
+            return 0;
+          const [t0, v0] = samples[0];
+          const [t1, v1] = samples[samples.length - 1];
+          return t1 > t0 ? (v1 - v0) / ((t1 - t0) / 1000) : 0;
+        };
+
+        const sample = (samples, value) => {
+          const now = Date.now();
+          samples.push([now, value]);
+          while (samples.length > 2 && now - samples[0][0] > 60000)
+            samples.shift();
         };
 
         try {
           const params = new URLSearchParams(location.search);
           const network = params.get('network') || 'testnet';
+
+          if (typeof WebTransport !== 'function') {
+            throw new Error('This browser has no WebTransport, or the page'
+              + ' is not served over HTTPS.');
+          }
 
           const node = new bcash.SPVNode({
             network,
@@ -50,21 +206,222 @@
           });
 
           window.node = node;
+          const {pool, chain} = node;
 
-          node.on('error', err => print(`error: ${err.message}`));
-          node.chain.on('connect', (entry) => {
-            state.textContent = `Height ${entry.height}, `
-              + `${node.pool.peers.size()} peers.`;
+          // Which dials are to a seed (by name) and which to a node (by
+          // certificate hash).
+          const how = new Map();
+          const dial = pool.options.createSocket;
+          pool.options.createSocket = (port, host) => {
+            const name = `${host}:${port}`;
+            const pinned = pool.wtHosts.get(name) != null;
+            how.set(name, pinned ? 'node, by hash' : 'seed, by name');
+            print(pinned
+              ? `Dialing node ${name}, pinning its certificate by hash.`
+              : `Dialing seed ${name} by domain, to ask which nodes it`
+                + ' knows.');
+            return dial(port, host);
+          };
+
+          const opened = new Map();
+          pool.on('peer connect', (peer) => {
+            print(`Connected to ${peer.hostname()}: WebTransport session`
+              + ' open, starting the version handshake.');
           });
-          node.pool.on('peer open', peer => print(`peer ${peer.hostname()}`));
+          pool.on('peer open', (peer) => {
+            opened.set(peer.id, Date.now());
+            print(`Handshake done with ${peer.hostname()}: ${peer.agent},`
+              + ` its tip at ${num(peer.height)}.`);
+          });
+          pool.on('peer close', (peer, connected) => {
+            const since = opened.get(peer.id);
+            opened.delete(peer.id);
+            if (how.get(peer.hostname()) === 'seed, by name' && connected) {
+              print(`Left seed ${peer.hostname()}: it named nodes to use.`);
+              return;
+            }
+            print(connected
+              ? `Disconnected from ${peer.hostname()}`
+                + (since ? ` after ${duration((Date.now() - since) / 1000)}`
+                  : '') + '.'
+              : `Could not reach ${peer.hostname()}.`, 'warn');
+          });
+          pool.on('loader', (peer) => {
+            print(`Syncing from ${peer.hostname()}.`);
+          });
+          node.on('error', err => print(`Error: ${err.message}`, 'err'));
+
+          let checkpoint = -1;
+          chain.on('full', () => print('Synced: following the tip now.'));
+
+          setState('Opening the chain.',
+            'Reading blocks kept in this browser (IndexedDB).');
 
           await node.open();
-          state.textContent = `Height ${node.chain.height}.`;
+
+          const start = chain.height;
+          const began = Date.now();
+          print(start > 0
+            ? `Opened the chain kept in this browser, at height ${num(start)}.`
+            : 'No chain kept in this browser yet: starting from genesis.');
+
+          const known = pool.wtHosts.size;
+          const seeds = pool.wtDomainSeeds.map(s => s.addr.hostname);
+          print(known > 0
+            ? `Remembered ${known} node${known > 1 ? 's' : ''} from before:`
+              + ' dialing them first.'
+            : `No nodes remembered: asking the ${network} seeds`
+              + ` (${seeds.join(', ') || 'none'}).`);
+
           await node.connect();
           node.startSync();
+
+          const blocks = [];
+          const headers = [];
+          let last = '';
+
+          const render = () => {
+            const height = chain.height;
+            let best = height;
+            const rows = [];
+
+            for (let peer = pool.peers.head(); peer; peer = peer.next) {
+              if (peer.handshake)
+                best = Math.max(best, peer.height);
+              rows.push([
+                peer.hostname(),
+                how.get(peer.hostname()) || (peer.outbound ? 'outbound' : ''),
+                peer.handshake
+                  ? (peer === pool.peers.load ? 'syncing from' : 'open')
+                  : (peer.connected ? 'handshaking' : 'connecting'),
+                peer.agent || ''
+              ]);
+            }
+
+            $('peers').replaceChildren(...rows.map((cells) => {
+              const tr = document.createElement('tr');
+              for (const cell of cells) {
+                const td = document.createElement('td');
+                td.textContent = cell;
+                tr.appendChild(td);
+              }
+              return tr;
+            }));
+
+            sample(blocks, height);
+
+            // Headers first, up to the next checkpoint: no block comes
+            // until the headers reach it.
+            const tail = pool.headerChain && pool.headerChain.tail;
+            const tip = pool.headerTip;
+            const inHeaders = pool.checkpoints && tail && tip
+              && tail.height < tip.height && peerCount() > 0;
+
+            if (inHeaders) {
+              sample(headers, tail.height);
+              if (tip.height !== checkpoint) {
+                checkpoint = tip.height;
+                print(`Fetching headers up to checkpoint ${num(tip.height)};`
+                  + ' blocks follow once they reach it.');
+              }
+            } else {
+              headers.length = 0;
+            }
+
+            const blockRate = rate(blocks);
+            const pct = best > 0 ? height / best : 0;
+            $('bar').style.width = `${(pct * 100).toFixed(2)}%`;
+
+            let state;
+            let detail = '';
+            if (peerCount() === 0) {
+              state = pool.peers.size() > 0
+                ? 'Connecting to a node.'
+                : 'Finding nodes.';
+              detail = 'Waiting for a WebTransport peer.';
+            } else if (chain.synced) {
+              state = `Synced at height ${num(height)}.`;
+              detail = 'Following the tip: new blocks arrive as they are'
+                + ' mined.';
+            } else if (inHeaders) {
+              const headerRate = rate(headers);
+              state = `Downloading headers to checkpoint ${num(tip.height)}.`;
+              detail = `${num(tail.height)} of ${num(tip.height)} headers`
+                + ` (${num(tip.height - tail.height)} to go, `
+                + `${headerRate > 0 ? Math.round(headerRate) : '?'}/s,`
+                + ` ETA ${duration((tip.height - tail.height) / headerRate)}).`
+                + ' Block height pauses until then.';
+            } else {
+              state = 'Downloading blocks.';
+              detail = blockRate > 0
+                ? `${Math.round(blockRate)} blocks/s.`
+                : 'Waiting for blocks.';
+            }
+
+            if (state !== last) {
+              last = state;
+              if (/^Synced|^Downloading blocks/.test(state))
+                print(state);
+            }
+
+            setState(state, detail);
+
+            const tipTime = chain.tip
+              ? new Date(chain.tip.time * 1000).toISOString().slice(0, 10)
+              : '';
+            const left = Math.max(0, best - height);
+
+            // The ETA from this visit's average, pauses for headers
+            // included: the last minute alone swings with them.
+            const secs = (Date.now() - began) / 1000;
+            const average = secs > 10 ? (height - start) / secs : 0;
+
+            const stats = [
+              ['Network', network],
+              ['Height', `${num(height)} (block of ${tipTime})`],
+              ['Best known', `${num(best)}, from peers`],
+              ['Progress', `${(pct * 100).toFixed(2)}%, `
+                + `${num(left)} blocks to go`],
+              ['Rate', blockRate > 0
+                ? `${Math.round(blockRate)} blocks/s (last minute)`
+                : 'none in the last minute'],
+              ['Average', average > 0
+                ? `${Math.round(average)} blocks/s this visit,`
+                  + ' header pauses included'
+                : 'measuring'],
+              ['ETA', chain.synced
+                ? 'synced'
+                : average > 0
+                  ? `${duration(left / average)}, at this visit's average`
+                  : 'measuring'],
+              ['This visit', `from ${num(start)}, `
+                + `${num(height - start)} blocks synced`],
+              ['Nodes known', `${pool.wtHosts.size}`]
+            ];
+
+            $('stats').replaceChildren(...stats.flatMap(([k, v]) => {
+              const dt = document.createElement('dt');
+              dt.textContent = k;
+              const dd = document.createElement('dd');
+              dd.textContent = v;
+              return [dt, dd];
+            }));
+          };
+
+          function peerCount() {
+            let n = 0;
+            for (let peer = pool.peers.head(); peer; peer = peer.next) {
+              if (peer.handshake)
+                n += 1;
+            }
+            return n;
+          }
+
+          render();
+          setInterval(render, 1000);
         } catch (err) {
-          print(`error: ${err.message}`);
-          state.textContent = 'Failed.';
+          print(`Error: ${err.message}`, 'err');
+          setState('Failed.', err.message);
         }
       })();
     </script>
