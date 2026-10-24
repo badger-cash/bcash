@@ -255,6 +255,63 @@ describe('Pool avalanche addresses', function() {
     assert.strictEqual(dials, 16);
   });
 
+  it('should dial less often while dials add no stake', async () => {
+    const p = await pool(true);
+    delete p.fillOutbound;
+    p.addLoader = () => {};
+    p.addOutbound = () => {};
+    p.refill = () => {};
+    let dials = 0;
+    p.addAvalancheOutbound = () => {
+      dials += 1;
+    };
+
+    // Stake we can reach, and all the stake known.
+    const pm = p.avalanche.peerManager;
+    let connected = 100;
+    let total = 1000;
+    pm.getConnectedPeersScore = () => connected;
+    pm.getTotalPeersScore = () => total;
+
+    // A round each time the wait is over.
+    const round = () => {
+      p.lastAvalancheDials -= p.avalancheDialInterval;
+      p.fillOutbound();
+    };
+
+    round();
+    assert.strictEqual(dials, 8);
+    assert.strictEqual(p.avalancheDialInterval, 3000);
+
+    // Rounds that add nothing: the wait doubles, up to 5 minutes.
+    const waits = [];
+    for (let i = 0; i < 9; i++) {
+      round();
+      waits.push(p.avalancheDialInterval);
+    }
+    assert.deepStrictEqual(waits, [6000, 12000, 24000, 48000, 96000,
+      192000, 300000, 300000, 300000]);
+    assert.strictEqual(dials, 80);
+
+    // Before the wait is over, no dial.
+    p.lastAvalancheDials = Date.now();
+    p.fillOutbound();
+    assert.strictEqual(dials, 80);
+
+    // A round that finds stake: back to a few seconds.
+    connected = 150;
+    round();
+    assert.strictEqual(p.avalancheDialInterval, 3000);
+
+    round();
+    assert.strictEqual(p.avalancheDialInterval, 6000);
+
+    // New stake known, maybe on nodes not dialed yet: the same.
+    total = 1200;
+    round();
+    assert.strictEqual(p.avalancheDialInterval, 3000);
+  });
+
   it('should drop them without avalanche', async () => {
     const p = await pool(false);
     await p.handleAddr(fakePeer, new packets.AddrPacket([
