@@ -329,6 +329,42 @@ describe('Pool avalanche addresses', function() {
   });
 });
 
+describe('Pool avalanche parked blocks', function() {
+  it('should poll a block parked, or on a parked chain', async () => {
+    const p = await pool(true);
+    const polled = [];
+    p.avalanche.reconcileBlock = async (entry) => {
+      polled.push(entry.height);
+      return true;
+    };
+
+    // Parked by a policy; then one with more work on top of it.
+    p.chain.emit('parked', {height: 10});
+    p.chain.emit('candidate', {height: 11});
+    await new Promise(r => setImmediate(r));
+    assert.deepStrictEqual(polled, [10, 11]);
+  });
+
+  it('should not poll one while syncing', async () => {
+    const p = await pool(true);
+    const ava = p.avalanche;
+    const added = [];
+    ava.addToReconcile = async (type, item) => {
+      added.push([type, item.height]);
+      return true;
+    };
+
+    let ibd = true;
+    ava.isIBD = () => ibd;
+    assert.strictEqual(await ava.reconcileBlock({height: 10}), false);
+    assert.deepStrictEqual(added, []);
+
+    ibd = false;
+    assert.strictEqual(await ava.reconcileBlock({height: 10}), true);
+    assert.deepStrictEqual(added, [[Processor.itemTypes.BLOCK, 10]]);
+  });
+});
+
 describe('Pool avalanche messages', function() {
   it('should not hold a peer while a proof is checked', async () => {
     const p = await pool(true);

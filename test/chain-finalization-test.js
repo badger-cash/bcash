@@ -232,6 +232,24 @@ describe('Chain parking', function() {
     assert.strictEqual(await chain.isMainChain(more[2]), false);
   });
 
+  it('should tell of the blocks it does not connect for a park', async () => {
+    const {chain} = node;
+    const [base] = await mineMany(node, 1);
+    const a = await mineMany(node, 1, base);
+
+    const parked = [];
+    const candidates = [];
+    chain.on('parked', entry => parked.push(entry.height));
+    chain.on('candidate', entry => candidates.push(entry.height));
+
+    await chain.park(a[0]);
+
+    // Each with more work than the tip, for avalanche to poll.
+    const more = await mineMany(node, 2, a[0]);
+    assert.deepStrictEqual(parked, [a[0].height]);
+    assert.deepStrictEqual(candidates, more.map(e => e.height));
+  });
+
   it('should move back when unparked', async () => {
     const {chain} = node;
     const [base] = await mineMany(node, 1);
