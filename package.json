@@ -87,8 +87,15 @@
     "nan"
   ],
   "devDependencies": {
+    "assert": "2.1.0",
     "bmocha": "git+https://github.com/bcoin-org/bmocha.git#semver:=2.1.2",
-    "eslint": "8.57.1"
+    "buffer": "6.0.3",
+    "esbuild": "0.28.2",
+    "eslint": "8.57.1",
+    "events": "3.3.0",
+    "path-browserify": "1.0.1",
+    "process": "0.11.10",
+    "util": "0.12.5"
   },
   "main": "./lib/bcoin.js",
   "bin": {
@@ -101,6 +108,7 @@
   },
   "scripts": {
     "browserify": "browserify -s bcoin lib/bcoin-browser.js | uglifyjs -c > bcoin.js",
+    "build-browser": "node browser/build.js",
     "clean": "rm -f {browser/,}{bcoin.js,bcoin-worker.js,app.js,worker.js}",
     "docs": "jsdoc -c jsdoc.json",
     "lint": "eslint $(cat .eslintfiles)",
@@ -117,7 +125,8 @@
     "./lib/hd/wordlist": "./lib/hd/wordlist-browser.js",
     "./lib/workers/child": "./lib/workers/child-browser.js",
     "./lib/workers/parent": "./lib/workers/parent-browser.js",
-    "./lib/bcoin": "./lib/bcoin-browser.js"
+    "./lib/bcoin": "./lib/bcoin-browser.js",
+    "@fails-components/webtransport": false
   },
   "resolutions": {
     "nan": "^2.23.0"
