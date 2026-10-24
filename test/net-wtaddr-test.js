@@ -215,5 +215,137 @@ describe('wtaddr', function() {
           await node.close();
       }
     });
+
+    it('should start from a seed by name, then from what it kept',
+      async () => {
+        const fs = require('fs');
+        const os = require('os');
+        const path = require('path');
+        const FullNode = require('../lib/node/fullnode');
+        const SPVNode = require('../lib/node/spvnode');
+        const KeyRing = require('../lib/primitives/keyring');
+        const {makeCertificate} = require('../lib/net/webtransport');
+
+        const base = 20000 + crypto.randomInt(0, 10000);
+
+        // The seed's certificate, for its name, in files: as a domain's
+        // from Let's Encrypt.
+        const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bcash-wtseed-'));
+        const seedCert = makeCertificate({host: 'localhost'});
+        fs.writeFileSync(path.join(dir, 'cert.pem'), seedCert.cert);
+        fs.writeFileSync(path.join(dir, 'key.pem'), seedCert.privKey);
+
+        const full = new FullNode({
+          network: 'regtest',
+          memory: true,
+          workers: false,
+          bip37: true,
+          listen: false,
+          host: '127.0.0.1',
+          httpPort: base + 1,
+          wtPort: base + 2,
+          wtHost: '127.0.0.1',
+          wtSeedPort: base + 3,
+          wtSeedCert: path.join(dir, 'cert.pem'),
+          wtSeedKey: path.join(dir, 'key.pem')
+        });
+
+        // A page's WebTransport: the browser checks a seed's certificate
+        // as for any site; here, by pinning it, as no CA signed it.
+        const dials = [];
+        function webTransport(url, options) {
+          const {host} = new URL(url);
+          dials.push([host, Boolean(options.serverCertificateHashes)]);
+          if (host === `localhost:${base + 3}`) {
+            assert(!options.serverCertificateHashes);
+            options = {serverCertificateHashes: [{
+              algorithm: 'sha-256',
+              value: Buffer.from(seedCert.hash, 'hex')
+            }]};
+          }
+          return new addon.WebTransport(url, options);
+        }
+
+        // A page's localStorage.
+        const kept = {data: null};
+        const wtStore = {
+          load: async () => kept.data,
+          save: async (data) => {
+            kept.data = data;
+          }
+        };
+
+        const until = async (check) => {
+          for (let i = 0; i < 400 && !check(); i++)
+            await new Promise(r => setTimeout(r, 100));
+          return check();
+        };
+
+        const page = port => new SPVNode({
+          network: 'regtest',
+          memory: true,
+          workers: false,
+          httpPort: port,
+          webTransport,
+          wtStore,
+          wtSeeds: [`localhost:${base + 3}`]
+        });
+
+        const self = `127.0.0.1:${base + 2}`;
+        const peerHosts = (node) => {
+          const hosts = [];
+          for (let peer = node.pool.peers.head(); peer; peer = peer.next)
+            hosts.push(peer.hostname());
+          return hosts;
+        };
+
+        let spv = null;
+        try {
+          await full.open();
+          await full.connect();
+
+          const address = KeyRing.generate().getAddress()
+            .toString('regtest');
+          const json = await full.rpc.call({
+            method: 'generatetoaddress',
+            params: [20, address]
+          }, {});
+          assert(!json.error);
+
+          // First visit: the seed, by name; it names the node's own
+          // endpoint, and the page leaves it for that.
+          spv = page(base + 4);
+          await spv.open();
+          await spv.connect();
+          spv.startSync();
+
+          assert(await until(() => spv.chain.height === 20));
+          assert.deepStrictEqual(dials[0], [`localhost:${base + 3}`, false]);
+          assert(dials.some(([host, pinned]) => host === self && pinned));
+          assert(await until(() => {
+            const hosts = peerHosts(spv);
+            return hosts.length === 1 && hosts[0] === self;
+          }));
+          assert(kept.data);
+
+          await spv.close();
+          spv = null;
+
+          // Back again: straight to the node it kept, no seed.
+          dials.length = 0;
+          spv = page(base + 5);
+          await spv.open();
+          await spv.connect();
+          spv.startSync();
+
+          assert(await until(() => spv.chain.height === 20));
+          assert.deepStrictEqual(dials, [[self, true]]);
+        } finally {
+          if (spv)
+            await spv.close();
+          await full.close();
+          fs.rmSync(dir, {recursive: true, force: true});
+        }
+      });
   });
 });

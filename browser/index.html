@@ -24,9 +24,9 @@
     <pre id="log"></pre>
     <script>
       // bcash's SPV node in the page, with no proxy: the chain in
-      // IndexedDB, peers bcash full nodes over WebTransport. The seed list
-      // is served beside the page, as seeds.json:
-      // {"network": "testnet", "seeds": [{"host", "port", "hashes": []}]}.
+      // IndexedDB, peers bcash full nodes over WebTransport, found from the
+      // network's seeds and remembered for the next visit. ?network=
+      // picks the network (testnet by default).
       (async () => {
         const state = document.getElementById('state');
         const log = document.getElementById('log');
@@ -36,7 +36,8 @@
         };
 
         try {
-          const {network, seeds} = await (await fetch('seeds.json')).json();
+          const params = new URLSearchParams(location.search);
+          const network = params.get('network') || 'testnet';
 
           const node = new bcash.SPVNode({
             network,
@@ -45,7 +46,7 @@
             workers: false,
             logConsole: false,
             webTransport: WebTransport,
-            wtSeeds: seeds
+            wtStore: bcash.localStore(`bcash-wthosts-${network}`)
           });
 
           window.node = node;

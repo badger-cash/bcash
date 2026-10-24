@@ -46,6 +46,11 @@ describe('WebTransport', function() {
       // Its IP address too.
       assert.strictEqual(x.subjectAltName, 'IP Address:203.0.113.7');
 
+      // Or its name: a leaf with neither, quiche will not serve.
+      const named = new crypto.X509Certificate(
+        makeCertificate({host: 'localhost'}).cert);
+      assert.strictEqual(named.subjectAltName, 'DNS:localhost');
+
       // Its key matches.
       const key = crypto.createPrivateKey(c.privKey);
       const sig = crypto.sign('sha256', Buffer.from('x'), key);
@@ -131,6 +136,40 @@ describe('WebTransport', function() {
           assert.strictEqual(servers[1].options.cert, next.cert);
           assert.strictEqual(rotated.length, 1);
           assert(wt.next.notAfter - late > CERT_LIFETIME - CERT_RENEW - DAY);
+        } finally {
+          await wt.close();
+        }
+      });
+
+    it('should serve a given certificate, and reload it once changed',
+      async () => {
+        const {servers, module} = fakeModule();
+        let given = makeCertificate({host: 'localhost'});
+        const wt = new WebTransportServer({
+          load: async () => module,
+          certificate: async () => given
+        });
+
+        await wt.listen(4433, '127.0.0.1');
+        try {
+          assert.strictEqual(servers[0].options.cert, given.cert);
+          assert.strictEqual(servers[0].options.privKey, given.privKey);
+
+          // Not one a page pins: it is dialed by name.
+          assert.deepStrictEqual(wt.getHashes(), []);
+
+          // The same: no restart.
+          assert.strictEqual(await wt.maybeRotate(), false);
+          assert.strictEqual(servers.length, 1);
+
+          // Renewed: the listener serves the new one.
+          given = makeCertificate({host: 'localhost'});
+          const reloaded = [];
+          wt.on('reload', () => reloaded.push(true));
+          assert.strictEqual(await wt.maybeRotate(), true);
+          assert(servers[0].stopped);
+          assert.strictEqual(servers[1].options.cert, given.cert);
+          assert.strictEqual(reloaded.length, 1);
         } finally {
           await wt.close();
         }
