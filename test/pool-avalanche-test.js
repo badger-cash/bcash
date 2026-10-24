@@ -310,6 +310,14 @@ describe('Pool avalanche addresses', function() {
     total = 1200;
     round();
     assert.strictEqual(p.avalancheDialInterval, 3000);
+
+    // A proof that comes and goes counts once: it went, and came back.
+    total = 1000;
+    round();
+    assert.strictEqual(p.avalancheDialInterval, 6000);
+    total = 1200;
+    round();
+    assert.strictEqual(p.avalancheDialInterval, 12000);
   });
 
   it('should drop them without avalanche', async () => {
@@ -473,7 +481,8 @@ describe('Pool avalanche quorum', function() {
   });
 
   // Stakers {score, nodes: [ids]}; connections with no node: ids too.
-  function trimmer(stakers, others, limit, busy = [], share = 1) {
+  function trimmer(stakers, others, limit, busy = [], share = 1,
+    {pending = [], young = []} = {}) {
     const nodes = new Map();
     const peers = new Map();
     let total = 0;
@@ -488,8 +497,10 @@ describe('Pool avalanche quorum', function() {
       }
     });
 
+    // Open long enough to have said hello, but the young.
     const conns = [...nodes.keys(), ...others].map(id => ({
       id, avalancheOutbound: true, closed: false,
+      time: young.includes(id) ? Date.now() : 1,
       hostname: () => `10.0.0.${id}:8333`,
       destroy() {
         this.closed = true;
@@ -508,6 +519,7 @@ describe('Pool avalanche quorum', function() {
         peerManager: {
           ms: () => 5,
           getNode: id => nodes.get(id) || null,
+          pendingNodes: new Map(pending.map(id => [id, {nodeId: id}])),
           peers,
           getTotalPeersScore: () => total,
           getConnectedPeersScore: () => Math.round(total * share)
@@ -546,6 +558,38 @@ describe('Pool avalanche quorum', function() {
     assert.deepStrictEqual(trimmer(stakers, [7, 8], 1, [], 0.82).closed,
       [2, 7, 8]);
   });
+
+  it('should spare a connection whose node may yet be a staker\'s', () => {
+    const stakers = [
+      {score: 60, nodes: [1]},
+      {score: 20, nodes: [2, 3]},
+      {score: 20, nodes: [4]}
+    ];
+
+    // 7 said hello and its proof is being checked; 8 has just opened.
+    // Neither goes; 9, open a while and no node, does.
+    const {closed} = trimmer(stakers, [7, 8, 9], 3, [], 1,
+      {pending: [7], young: [8]});
+    assert.deepStrictEqual(closed, [2, 9]);
+  });
+
+  it('should dial trimmed avalanche nodes again short of the ratio',
+    async () => {
+      const p = await pool(true);
+      p.options.spv = true;
+      let ratio = true;
+      p.avalanche.hasConnectedRatio = () => ratio;
+      p.trimmed.add('10.0.0.9:18333');
+
+      // With the ratio, they stay trimmed.
+      p.forgetTrimmed();
+      assert(p.trimmed.has('10.0.0.9:18333'));
+
+      // Proofs learned since dropped us below it: dial them again.
+      ratio = false;
+      p.forgetTrimmed();
+      assert.strictEqual(p.trimmed.size, 0);
+    });
 
   it('should not dial a trimmed avalanche node again', async () => {
     const p = await pool(true);
