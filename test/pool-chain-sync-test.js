@@ -326,3 +326,107 @@ describe('Pool chain sync eviction', function() {
     await spv.close();
   });
 });
+
+describe('Pool getheaders from another chain', function() {
+  let blocks, chain, pool, main, known;
+
+  // Our main chain, heights 0 to 500000, by hash; and hashes we know
+  // off it (a short fork).
+  const hashAt = h => Buffer.from(String(h).padStart(64, '0'), 'hex');
+
+  beforeEach(async () => {
+    blocks = new BlockStore({network, memory: true});
+    chain = new Chain({network, memory: true, blocks});
+    await blocks.open();
+    await chain.open();
+    pool = new Pool({network, chain, listen: false});
+
+    main = new BufferMap();
+    known = new BufferMap();
+    for (const h of [0, 10000, 499000, 499995, 500000])
+      main.set(hashAt(h), {hash: hashAt(h), height: h});
+
+    chain.synced = true;
+    Object.defineProperty(chain, 'height', {get: () => 500000});
+    chain.findLocator = async (locator) => {
+      for (const hash of locator) {
+        if (main.has(hash))
+          return hash;
+      }
+      return hashAt(0);
+    };
+    chain.hasEntry = async hash => main.has(hash) || known.has(hash);
+    chain.getEntry = async hash => main.get(hash) || known.get(hash) || null;
+    chain.getNextHash = async () => null;
+    chain.getNext = async () => null;
+  });
+
+  afterEach(async () => {
+    await chain.close();
+    await blocks.close();
+  });
+
+  const peerOf = (options) => {
+    const peer = fakePeer(options);
+    peer.headers = null;
+    peer.sendHeaders = (headers) => {
+      peer.headers = headers;
+    };
+    pool.peers.add(peer);
+    return peer;
+  };
+  const getheaders = (peer, locator) =>
+    pool.handleGetHeaders(peer, {locator, stop: null});
+  const unknown = () => randomBytes(32);
+
+  it('drops an outbound peer whose chain left ours long ago', async () => {
+    const peer = peerOf();
+    const [host, port] = peer.hostname().split(':');
+    pool.hosts.add(NetAddress.fromHost(host, Number(port), network));
+    assert(pool.hosts.map.has(peer.hostname()));
+
+    // Its tip unknown, meeting ours 490000 blocks down.
+    await getheaders(peer, [unknown(), unknown(), hashAt(10000)]);
+
+    assert(peer.destroyed);
+    assert.strictEqual(peer.headers, null);
+    assert(pool.oldChain.has(peer.hostname()));
+    assert(!pool.hosts.map.has(peer.hostname()));
+  });
+
+  it('drops an inbound one too, without listing it', async () => {
+    const peer = peerOf({outbound: false});
+    await getheaders(peer, [unknown(), hashAt(0)]);
+    assert(peer.destroyed);
+    assert(!pool.oldChain.has(peer.hostname()));
+  });
+
+  it('serves a peer on a short fork', async () => {
+    const peer = peerOf();
+    await getheaders(peer, [unknown(), hashAt(499995)]);
+    assert(!peer.destroyed);
+    assert.deepStrictEqual(peer.headers, []);
+  });
+
+  it('serves a peer far behind on our chain', async () => {
+    const peer = peerOf();
+    await getheaders(peer, [hashAt(10000), hashAt(0)]);
+    assert(!peer.destroyed);
+    assert(peer.headers);
+  });
+
+  it('serves a peer whose fork tip we know', async () => {
+    const tip = unknown();
+    known.set(tip, {hash: tip, height: 20000});
+    const peer = peerOf();
+    await getheaders(peer, [tip, hashAt(10000)]);
+    assert(!peer.destroyed);
+  });
+
+  it('serves the nodes we were given, whatever their chain', async () => {
+    const peer = peerOf();
+    pool.hosts.nodes.push(NetAddress.fromHostname(peer.hostname(), network));
+    await getheaders(peer, [unknown(), hashAt(0)]);
+    assert(!peer.destroyed);
+  });
+});
