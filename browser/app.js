@@ -939,12 +939,23 @@ function sendTab(key, bal) {
   const spendable = coins.spendable(key.address)
     .reduce((s, c) => s + c.value, 0);
 
+  if (ui.send && ui.send.broadcasting) {
+    const {value, to} = ui.send.broadcasting;
+    return el('div', {class: 'card center'},
+      el('div', {class: 'spinner', 'aria-hidden': 'true'}),
+      el('h2', {}, 'Broadcasting'),
+      el('p', {}, `Sending ${xec(value)} ${ticker} to peers.`),
+      el('p', {class: 'muted small'}, `To ${short(to, 12)}. Signed here;`
+        + ' waiting for a peer to take it.'));
+  }
+
   if (ui.send && ui.send.sent) {
     const {txid, value} = ui.send.sent;
     return el('div', {class: 'card'},
       el('h2', {}, 'Sent'),
       el('p', {}, `${xec(value)} ${ticker} is on its way.`),
-      el('p', {class: 'mono small'}, txid),
+      el('a', {class: 'mono small txid', href: explorer(txid),
+        target: '_blank', rel: 'noopener'}, txid),
       el('button', {onclick: () => {
         ui.send = null;
         ui.tab = 'wallet';
@@ -957,7 +968,8 @@ function sendTab(key, bal) {
     return el('div', {class: 'card'},
       el('h2', {}, 'Review'),
       el('dl', {},
-        el('dt', {}, 'To'), el('dd', {class: 'mono'}, to),
+        el('dt', {class: 'full'}, 'To'),
+        el('dd', {class: 'mono one-line'}, to),
         el('dt', {}, 'Amount'), el('dd', {}, `${xec(value)} ${ticker}`),
         el('dt', {}, 'Fee'), el('dd', {}, `${xec(fee)} ${ticker}`),
         el('dt', {}, 'Total'), el('dd', {}, `${xec(value + fee)} ${ticker}`)),
@@ -968,7 +980,15 @@ function sendTab(key, bal) {
           render();
         }}, 'Back'),
         el('button', {class: 'primary', onclick: () => busy(async () => {
-          await sendPayment({coins, node, tx});
+          // At once: what is happening, while peers take it.
+          ui.send = {broadcasting: {value, to}};
+          render();
+          try {
+            await sendPayment({coins, node, tx});
+          } catch (e) {
+            ui.send = {review: {tx, fee, value, to}};
+            throw e;
+          }
           ui.send = {sent: {txid: tx.txid(), value}};
           log(`Sent ${xec(value)} ${ticker}: ${tx.txid()}.`);
         })}, 'Send')));

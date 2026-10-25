@@ -434,6 +434,46 @@
         margin: 0;
         overflow-wrap: anywhere;
       }
+      /* A label over its own full-width line. */
+      dt.full {
+        grid-column: 1 / -1;
+      }
+      dt.full + dd {
+        grid-column: 1 / -1;
+        margin-bottom: 6px;
+      }
+      /* An address on one line: its font fits the width, to a phone's. */
+      .one-line {
+        white-space: nowrap;
+        overflow-wrap: normal;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        font-size: clamp(8.5px, 2.4vw, 14px);
+      }
+      a.txid {
+        display: block;
+        margin: 8px 0;
+        overflow-wrap: anywhere;
+      }
+      .spinner {
+        width: 36px;
+        height: 36px;
+        margin: 8px auto;
+        border: 3px solid var(--line);
+        border-top-color: var(--accent);
+        border-radius: 50%;
+        animation: spin 0.9s linear infinite;
+      }
+      @keyframes spin {
+        to {
+          transform: rotate(360deg);
+        }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .spinner {
+          animation-duration: 3s;
+        }
+      }
       .words {
         columns: 2;
         padding-left: 28px;
