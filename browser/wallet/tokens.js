@@ -198,6 +198,10 @@ class Tokens extends EventEmitter {
       if (!coin.token)
         continue;
 
+      // Kept before tokens were read: being read now.
+      if (coin.slp === undefined)
+        continue;
+
       const info = coin.slp;
       const key = info && info.tokenId ? info.tokenId : 'unsupported';
 
@@ -277,6 +281,8 @@ class Tokens extends EventEmitter {
   }
 
   async checkPending() {
+    await this.backfill();
+
     const txids = new Set();
     for (const coin of Object.values(this.coins.state.coins)) {
       if (coin.token && !coin.spent && coin.slp && coin.slp.tokenId
@@ -288,6 +294,56 @@ class Tokens extends EventEmitter {
 
     for (const txid of txids)
       await this.check(txid);
+  }
+
+  /**
+   * Token coins kept before the wallet read tokens: known to be token
+   * coins, but not which token or how much, nor their transactions. Each
+   * transaction is fetched once, from its block or a mempool, and read.
+   */
+
+  async backfill() {
+    const byTX = new Map();
+    for (const coin of Object.values(this.coins.state.coins)) {
+      if (coin.token && !coin.spent && coin.slp === undefined)
+        byTX.set(coin.txid, coin.height);
+    }
+
+    if (byTX.size === 0)
+      return;
+
+    for (const [txid, height] of byTX) {
+      let got = null;
+
+      if (height !== -1) {
+        const found = await this.fetch(new Set([txid]), height, height);
+        got = found.get(txid);
+      } else {
+        const {found} = await this.fetchMempool([txid]);
+        got = found.get(txid);
+      }
+
+      if (!got)
+        continue;
+
+      const record = read(got.tx);
+      const ours = this.coins.state.txs[txid];
+      if (ours)
+        ours.raw = got.tx.toRaw().toString('hex');
+
+      for (const coin of Object.values(this.coins.state.coins)) {
+        if (coin.txid !== txid)
+          continue;
+        coin.slp = record && record.tokenId && coin.vout > 0 ? {
+          tokenId: record.tokenId,
+          amount: String(record.amounts[coin.vout] || 0n),
+          baton: record.baton === coin.vout
+        } : null;
+      }
+    }
+
+    this.coins.save();
+    this.emit('change');
   }
 
   /**

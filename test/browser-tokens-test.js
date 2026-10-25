@@ -199,12 +199,18 @@ describe('Web wallet tokens', function() {
       assert.strictEqual(coin.slp.amount, '5');
       assert.strictEqual(tokens.status(coin), 'unknown');
 
-      // Added by its genesis: the coin is good.
+      // As the wallet kept it before it read tokens: a token coin, no more.
+      delete coin.slp;
+      delete coins.state.txs[s1.txid()].raw;
+      assert.strictEqual(tokens.balances(a.address).length, 0);
+
+      // Added by its genesis: the coin is read again, and is good.
       const token = await tokens.add(g1.txid(), g1Height);
       assert.strictEqual(token.ticker, 'TCENT');
       assert.strictEqual(token.decimals, 2);
       assert.strictEqual(token.version, 1);
       await tokens.checkAll();
+      assert.strictEqual(coin.slp.amount, '5');
       assert.strictEqual(tokens.status(coin), 'valid');
       await assert.rejects(tokens.add(s1.txid(), g1Height), /genesis/);
 
