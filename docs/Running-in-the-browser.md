@@ -42,17 +42,37 @@ $ bcash --wt-port=18335 --wt-host=203.0.113.7 --bip37 \
 
 See [Configuration](Configuration.md).
 
-## The page
+## The wallet
 
 ```
 $ yarn install
 $ yarn build-browser
 ```
 
-This bundles `browser/spv.js` into `browser/bcash-spv.js`, a script exposing
-`bcash`. `browser/index.html` is a minimal page: serve it and the bundle
-from any static web server, over HTTPS (browsers offer WebTransport only to
-secure pages). `?network=` picks the network; testnet by default.
+This builds `browser/bcash-wallet.js`, the web wallet that
+`browser/index.html` loads, and `browser/bcash-spv.js`, the SPV node alone,
+a script exposing `bcash`, for pages of your own. Serve `index.html` and
+`bcash-wallet.js` from any static web server, over HTTPS (browsers offer
+WebTransport only to secure pages). `?network=` picks the network; testnet
+by default.
+
+The wallet (`browser/app.js`, on `browser/wallet/`):
+
+- **Keys**, each with a name: new recovery phrases (BIP39, 12 words; the one
+  address at Cashtab's path, m/44'/1899'/0'/0/0, so a Cashtab phrase opens
+  the same address) or WIF keys, and imports of either. Each key keeps the
+  block it was made at: its scan starts there.
+- **Encrypted** with a password in the browser (PBKDF2 and AES-GCM), keys
+  and the coins and history alike. Secrets show only with the password
+  again.
+- **The wallet file**: every key, phrase and birth height, encrypted with
+  the password. Imported in another browser, it restores the wallet with a
+  fast sync.
+- **Coins** as peers relay them, then confirmed in blocks; history; sending
+  XEC at 1 sat a byte. A coin from a transaction carrying SLP is kept apart
+  and never spent as XEC, so a payment cannot burn a token.
+- Its chain starts at the newest checkpoint built in, so coins a key held
+  only before that block are not found yet.
 
 In a page of your own:
 

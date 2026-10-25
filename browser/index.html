@@ -3,70 +3,327 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>bcash SPV</title>
+    <title>bcash wallet</title>
     <style>
       :root {
-        --fg: #111;
-        --muted: #666;
-        --bg: #fff;
-        --panel: #f4f4f4;
-        --bar: #2a7;
-        --warn: #b60;
-        --err: #c22;
+        --bg: #0d0f14;
+        --card: #171a22;
+        --line: #262b37;
+        --fg: #eef0f5;
+        --muted: #8a91a3;
+        --accent: #00abe7;
+        --accent-fg: #00121a;
+        --in: #3ccf8e;
+        --out: #eef0f5;
+        --warn: #f0a33c;
+        --err: #ff6b6b;
+        color-scheme: dark;
       }
-      @media (prefers-color-scheme: dark) {
+      @media (prefers-color-scheme: light) {
         :root {
-          --fg: #e6e6e6;
-          --muted: #999;
-          --bg: #121212;
-          --panel: #1e1e1e;
-          --bar: #3c9;
-          --warn: #e93;
-          --err: #f66;
+          --bg: #f3f5f9;
+          --card: #ffffff;
+          --line: #e1e5ee;
+          --fg: #121620;
+          --muted: #616a7d;
+          --accent: #0088c2;
+          --accent-fg: #ffffff;
+          --in: #11935c;
+          --out: #121620;
+          --warn: #b46a00;
+          --err: #c62828;
+          color-scheme: light;
         }
       }
+      * {
+        box-sizing: border-box;
+      }
       body {
-        margin: 16px;
-        font: 14px/1.5 monospace;
-        color: var(--fg);
+        margin: 0;
         background: var(--bg);
+        color: var(--fg);
+        font: 15px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+      }
+      #app {
+        max-width: 520px;
+        margin: 0 auto;
+        padding: 16px;
       }
       h1 {
+        font-size: 1.5em;
         margin: 0 0 8px;
-        font-size: 1.4em;
       }
       h2 {
-        margin: 20px 0 6px;
-        font-size: 1em;
+        font-size: 1.05em;
+        margin: 16px 0 8px;
+      }
+      p {
+        margin: 8px 0;
+      }
+      a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      hr {
+        border: 0;
+        border-top: 1px solid var(--line);
+        margin: 16px 0;
+      }
+      .muted {
         color: var(--muted);
       }
-      #state {
-        font-size: 1.1em;
-        margin: 0 0 4px;
+      .small {
+        font-size: 0.85em;
       }
-      #detail {
+      .mono {
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        overflow-wrap: anywhere;
+      }
+      .error {
+        color: var(--err);
+      }
+      .warn {
+        color: var(--warn);
+      }
+      .card {
+        background: var(--card);
+        border: 1px solid var(--line);
+        border-radius: 14px;
+        padding: 16px;
+        margin: 12px 0;
+      }
+      .narrow {
+        max-width: 420px;
+        margin: 10vh auto 0;
+      }
+      .center {
+        text-align: center;
+      }
+      label {
+        display: block;
+        margin: 12px 0 4px;
         color: var(--muted);
-        margin: 0 0 12px;
+        font-size: 0.9em;
       }
-      .bar {
-        height: 10px;
-        background: var(--panel);
-        border-radius: 5px;
-        overflow: hidden;
-        max-width: 640px;
+      input, textarea, select {
+        width: 100%;
+        padding: 10px 12px;
+        border-radius: 10px;
+        border: 1px solid var(--line);
+        background: var(--bg);
+        color: var(--fg);
+        font: inherit;
       }
-      .bar > div {
-        height: 100%;
-        width: 0;
-        background: var(--bar);
-        transition: width 0.5s;
+      input:focus, textarea:focus, select:focus {
+        outline: 2px solid var(--accent);
+        outline-offset: -1px;
+      }
+      textarea {
+        resize: vertical;
+      }
+      button {
+        margin: 12px 8px 0 0;
+        padding: 10px 16px;
+        border-radius: 10px;
+        border: 1px solid var(--line);
+        background: var(--card);
+        color: var(--fg);
+        font: inherit;
+        cursor: pointer;
+      }
+      button:hover {
+        border-color: var(--accent);
+      }
+      button.primary {
+        width: 100%;
+        margin-right: 0;
+        background: var(--accent);
+        border-color: var(--accent);
+        color: var(--accent-fg);
+        font-weight: 600;
+      }
+      button.danger {
+        border-color: var(--err);
+        color: var(--err);
+      }
+      .row {
+        display: flex;
+        gap: 8px;
+        align-items: flex-end;
+      }
+      .row > * {
+        flex: 1;
+        min-width: 0;
+      }
+      .row > button {
+        flex: 0 0 auto;
+        margin-top: 0;
+        margin-right: 0;
+      }
+      details {
+        margin-top: 20px;
+      }
+      summary {
+        cursor: pointer;
+        color: var(--muted);
+      }
+      header {
+        display: flex;
+        gap: 10px;
+        align-items: center;
+      }
+      header select {
+        flex: 1;
+        width: auto;
+        min-width: 0;
+      }
+      .brand {
+        font-weight: 700;
+        font-size: 1.15em;
+      }
+      .brand span {
+        margin-left: 6px;
+        font-size: 0.65em;
+        font-weight: 500;
+        color: var(--muted);
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+      }
+      .chip {
+        margin: 0;
+        padding: 6px 10px;
+        border-radius: 999px;
+        font-size: 0.8em;
+        white-space: nowrap;
+      }
+      .chip.ok {
+        color: var(--in);
+      }
+      .chip.wait {
+        color: var(--warn);
+      }
+      .balance {
+        text-align: center;
+        padding: 28px 0 16px;
+      }
+      .balance .amount {
+        font-size: 2.4em;
+        font-weight: 700;
+        letter-spacing: -0.02em;
+        overflow-wrap: anywhere;
+      }
+      .balance .amount span {
+        font-size: 0.45em;
+        font-weight: 500;
+        color: var(--muted);
+      }
+      .notice {
+        background: var(--card);
+        border-left: 3px solid var(--accent);
+        padding: 8px 12px;
+        border-radius: 6px;
+        font-size: 0.9em;
+      }
+      nav {
+        display: flex;
+        gap: 4px;
+        border-bottom: 1px solid var(--line);
+        margin: 8px 0 4px;
+        overflow-x: auto;
+      }
+      nav button {
+        margin: 0;
+        border: 0;
+        border-bottom: 2px solid transparent;
+        border-radius: 0;
+        background: none;
+        color: var(--muted);
+        padding: 10px 12px;
+      }
+      nav button.active {
+        color: var(--fg);
+        border-bottom-color: var(--accent);
+      }
+      ul {
+        list-style: none;
+        padding: 0;
+        margin: 0;
+      }
+      .history li, .keys li, .peers li {
+        display: flex;
+        gap: 12px;
+        align-items: center;
+        padding: 12px 0;
+        border-bottom: 1px solid var(--line);
+      }
+      .peers li {
+        display: block;
+      }
+      .icon {
+        flex: 0 0 36px;
+        height: 36px;
+        border-radius: 50%;
+        display: grid;
+        place-items: center;
+        background: var(--card);
+        border: 1px solid var(--line);
+        font-weight: 700;
+      }
+      .icon.in {
+        color: var(--in);
+      }
+      .what {
+        flex: 1;
+        min-width: 0;
+      }
+      .value {
+        font-weight: 600;
+        white-space: nowrap;
+      }
+      .value.in {
+        color: var(--in);
+      }
+      .tag {
+        margin-left: 6px;
+        padding: 1px 6px;
+        border-radius: 6px;
+        border: 1px solid var(--line);
+        font-size: 0.75em;
+        color: var(--muted);
+      }
+      .actions {
+        display: flex;
+        flex-direction: column;
+      }
+      .actions button {
+        margin: 2px 0;
+        padding: 6px 10px;
+        font-size: 0.85em;
+      }
+      .empty {
+        text-align: center;
+        padding: 32px 0;
+      }
+      .qr {
+        width: min(260px, 70vw);
+        margin: 8px auto;
+        background: #fff;
+        border-radius: 12px;
+        padding: 8px;
+      }
+      .qr svg {
+        display: block;
+        width: 100%;
+        height: auto;
+      }
+      .address {
+        font-size: 0.95em;
       }
       dl {
         display: grid;
         grid-template-columns: max-content 1fr;
-        gap: 2px 16px;
-        margin: 12px 0 0;
-        max-width: 640px;
+        gap: 6px 16px;
+        margin: 0;
       }
       dt {
         color: var(--muted);
@@ -75,371 +332,45 @@
         margin: 0;
         overflow-wrap: anywhere;
       }
-      table {
-        border-collapse: collapse;
-        max-width: 100%;
+      .words {
+        columns: 2;
+        padding-left: 28px;
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
       }
-      td, th {
-        text-align: left;
-        padding: 2px 12px 2px 0;
-        vertical-align: top;
+      .words li {
+        list-style: decimal;
+        padding: 2px 0;
       }
-      th {
-        color: var(--muted);
-        font-weight: normal;
+      .modal {
+        position: fixed;
+        inset: 0;
+        background: rgba(0, 0, 0, 0.6);
+        display: grid;
+        place-items: start center;
+        padding: 16px;
+        overflow-y: auto;
       }
-      pre {
-        margin: 0;
+      .modal .card {
+        width: 100%;
+      }
+      .log {
+        background: var(--card);
+        border: 1px solid var(--line);
+        border-radius: 10px;
         padding: 8px;
-        background: var(--panel);
+        font-size: 0.8em;
         white-space: pre-wrap;
         overflow-wrap: anywhere;
         max-height: 50vh;
         overflow-y: auto;
       }
-      .warn {
-        color: var(--warn);
-      }
-      .err {
+      .log .err {
         color: var(--err);
       }
     </style>
-    <script src="bcash-spv.js"></script>
   </head>
   <body>
-    <h1>bcash SPV</h1>
-    <p id="state">Loading bcash.</p>
-    <p id="detail"></p>
-    <div class="bar"><div id="bar"></div></div>
-    <dl id="stats"></dl>
-
-    <h2>Peers</h2>
-    <table>
-      <thead>
-        <tr><th>Node</th><th>How</th><th>State</th><th>Agent</th></tr>
-      </thead>
-      <tbody id="peers"></tbody>
-    </table>
-
-    <h2>Events</h2>
-    <pre id="log"></pre>
-
-    <script>
-      // bcash's SPV node in the page, with no proxy: the chain in
-      // IndexedDB, started at the newest checkpoint built into bcash, peers
-      // bcash full nodes over WebTransport, found from the network's seeds
-      // and remembered for the next visit. ?network= picks the network
-      // (testnet by default).
-      (async () => {
-        const $ = id => document.getElementById(id);
-        const lines = [];
-
-        const time = () => new Date().toISOString().slice(11, 19);
-        const print = (msg, cls) => {
-          lines.unshift({text: `${time()} ${msg}`, cls});
-          lines.length = Math.min(lines.length, 300);
-          $('log').replaceChildren(...lines.map(({text, cls}) => {
-            const div = document.createElement('div');
-            div.textContent = text;
-            if (cls)
-              div.className = cls;
-            return div;
-          }));
-        };
-
-        const setState = (state, detail = '') => {
-          $('state').textContent = state;
-          $('detail').textContent = detail;
-        };
-
-        const duration = (secs) => {
-          if (!isFinite(secs) || secs < 0)
-            return 'unknown';
-          secs = Math.round(secs);
-          const d = Math.floor(secs / 86400);
-          const h = Math.floor(secs % 86400 / 3600);
-          const m = Math.floor(secs % 3600 / 60);
-          const s = secs % 60;
-          if (d > 0)
-            return `${d}d ${h}h`;
-          if (h > 0)
-            return `${h}h ${m}m`;
-          if (m > 0)
-            return `${m}m ${s}s`;
-          return `${s}s`;
-        };
-
-        const num = n => n.toLocaleString('en-US');
-
-        // Rate over the last minute, from [ms, value] samples.
-        const rate = (samples) => {
-          if (samples.length < 2)
-            return 0;
-          const [t0, v0] = samples[0];
-          const [t1, v1] = samples[samples.length - 1];
-          return t1 > t0 ? (v1 - v0) / ((t1 - t0) / 1000) : 0;
-        };
-
-        const sample = (samples, value) => {
-          const now = Date.now();
-          samples.push([now, value]);
-          while (samples.length > 2 && now - samples[0][0] > 60000)
-            samples.shift();
-        };
-
-        try {
-          const params = new URLSearchParams(location.search);
-          const network = params.get('network') || 'testnet';
-
-          if (typeof WebTransport !== 'function') {
-            throw new Error('This browser has no WebTransport, or the page'
-              + ' is not served over HTTPS.');
-          }
-
-          // Its own database per anchor: a chain kept from another start
-          // cannot be reopened at this one.
-          const anchor = bcash.newestCheckpoint(network);
-
-          const node = new bcash.SPVNode({
-            network,
-            prefix: `/bcash/anchor-${anchor.height}`,
-            anchor,
-            memory: false,
-            workers: false,
-            logConsole: false,
-            webTransport: WebTransport,
-            wtStore: bcash.localStore(`bcash-wthosts-${network}`)
-          });
-
-          window.node = node;
-          const {pool, chain} = node;
-
-          // Which dials are to a seed (by name) and which to a node (by
-          // certificate hash).
-          const how = new Map();
-          const dial = pool.options.createSocket;
-          pool.options.createSocket = (port, host) => {
-            const name = `${host}:${port}`;
-            const pinned = pool.wtHosts.get(name) != null;
-            how.set(name, pinned ? 'node, by hash' : 'seed, by name');
-            print(pinned
-              ? `Dialing node ${name}, pinning its certificate by hash.`
-              : `Dialing seed ${name} by domain, to ask which nodes it`
-                + ' knows.');
-            return dial(port, host);
-          };
-
-          const opened = new Map();
-          pool.on('peer connect', (peer) => {
-            print(`Connected to ${peer.hostname()}: WebTransport session`
-              + ' open, starting the version handshake.');
-          });
-          pool.on('peer open', (peer) => {
-            opened.set(peer.id, Date.now());
-            print(`Handshake done with ${peer.hostname()}: ${peer.agent},`
-              + ` its tip at ${num(peer.height)}.`);
-          });
-          pool.on('peer close', (peer, connected) => {
-            const since = opened.get(peer.id);
-            opened.delete(peer.id);
-            if (how.get(peer.hostname()) === 'seed, by name' && connected) {
-              print(`Left seed ${peer.hostname()}: it named nodes to use.`);
-              return;
-            }
-            print(connected
-              ? `Disconnected from ${peer.hostname()}`
-                + (since ? ` after ${duration((Date.now() - since) / 1000)}`
-                  : '') + '.'
-              : `Could not reach ${peer.hostname()}.`, 'warn');
-          });
-          pool.on('loader', (peer) => {
-            print(`Syncing from ${peer.hostname()}.`);
-          });
-          node.on('error', err => print(`Error: ${err.message}`, 'err'));
-
-          let checkpoint = -1;
-          chain.on('full', () => print('Synced: following the tip now.'));
-
-          setState('Opening the chain.',
-            `Starting at checkpoint ${num(anchor.height)}, built into this`
-            + ' bcash: the chain kept in this browser, or on a first visit'
-            + ' its headers from a node.');
-          print(`Starting from checkpoint ${num(anchor.height)}`
-            + ` (${anchor.hash.slice(0, 16)}...), built into this bcash:`
-            + ' every header after it is checked; nothing before it is'
-            + ' fetched.');
-
-          const opening = Date.now();
-          await node.open();
-
-          const start = chain.height;
-          const began = Date.now();
-          print(start > anchor.height
-            ? `Opened the chain kept in this browser, at height ${num(start)}.`
-            : `Chain anchored at ${num(anchor.height)} in`
-              + ` ${duration((began - opening) / 1000)}.`);
-
-          const known = pool.wtHosts.size;
-          const seeds = pool.wtDomainSeeds.map(s => s.addr.hostname);
-          print(known > 0
-            ? `Remembered ${known} node${known > 1 ? 's' : ''} from before:`
-              + ' dialing them first.'
-            : `No nodes remembered: asking the ${network} seeds`
-              + ` (${seeds.join(', ') || 'none'}).`);
-
-          await node.connect();
-          node.startSync();
-
-          const blocks = [];
-          const headers = [];
-          let last = '';
-
-          const render = () => {
-            const height = chain.height;
-            let best = height;
-            const rows = [];
-
-            for (let peer = pool.peers.head(); peer; peer = peer.next) {
-              if (peer.handshake)
-                best = Math.max(best, peer.height);
-              rows.push([
-                peer.hostname(),
-                how.get(peer.hostname()) || (peer.outbound ? 'outbound' : ''),
-                peer.handshake
-                  ? (peer === pool.peers.load ? 'syncing from' : 'open')
-                  : (peer.connected ? 'handshaking' : 'connecting'),
-                peer.agent || ''
-              ]);
-            }
-
-            $('peers').replaceChildren(...rows.map((cells) => {
-              const tr = document.createElement('tr');
-              for (const cell of cells) {
-                const td = document.createElement('td');
-                td.textContent = cell;
-                tr.appendChild(td);
-              }
-              return tr;
-            }));
-
-            sample(blocks, height);
-
-            // Headers first, up to the next checkpoint: no block comes
-            // until the headers reach it.
-            const tail = pool.headerChain && pool.headerChain.tail;
-            const tip = pool.headerTip;
-            const inHeaders = pool.checkpoints && tail && tip
-              && tail.height < tip.height && peerCount() > 0;
-
-            if (inHeaders) {
-              sample(headers, tail.height);
-              if (tip.height !== checkpoint) {
-                checkpoint = tip.height;
-                print(`Fetching headers up to checkpoint ${num(tip.height)};`
-                  + ' blocks follow once they reach it.');
-              }
-            } else {
-              headers.length = 0;
-            }
-
-            const blockRate = rate(blocks);
-            const span = best - anchor.height;
-            const pct = span > 0 ? (height - anchor.height) / span : 0;
-            $('bar').style.width = `${(pct * 100).toFixed(2)}%`;
-
-            let state;
-            let detail = '';
-            if (peerCount() === 0) {
-              state = pool.peers.size() > 0
-                ? 'Connecting to a node.'
-                : 'Finding nodes.';
-              detail = 'Waiting for a WebTransport peer.';
-            } else if (chain.synced) {
-              state = `Synced at height ${num(height)}.`;
-              detail = 'Following the tip: new blocks arrive as they are'
-                + ' mined.';
-            } else if (inHeaders) {
-              const headerRate = rate(headers);
-              state = `Downloading headers to checkpoint ${num(tip.height)}.`;
-              detail = `${num(tail.height)} of ${num(tip.height)} headers`
-                + ` (${num(tip.height - tail.height)} to go, `
-                + `${headerRate > 0 ? Math.round(headerRate) : '?'}/s,`
-                + ` ETA ${duration((tip.height - tail.height) / headerRate)}).`
-                + ' Block height pauses until then.';
-            } else {
-              state = 'Downloading blocks.';
-              detail = blockRate > 0
-                ? `${Math.round(blockRate)} blocks/s.`
-                : 'Waiting for blocks.';
-            }
-
-            if (state !== last) {
-              last = state;
-              if (/^Synced|^Downloading blocks/.test(state))
-                print(state);
-            }
-
-            setState(state, detail);
-
-            const tipTime = chain.tip
-              ? new Date(chain.tip.time * 1000).toISOString().slice(0, 10)
-              : '';
-            const left = Math.max(0, best - height);
-
-            // The ETA from this visit's average, pauses for headers
-            // included: the last minute alone swings with them.
-            const secs = (Date.now() - began) / 1000;
-            const average = secs > 10 ? (height - start) / secs : 0;
-
-            const stats = [
-              ['Network', network],
-              ['Height', `${num(height)} (block of ${tipTime})`],
-              ['Best known', `${num(best)}, from peers`],
-              ['Anchor', `checkpoint ${num(anchor.height)}, built in`],
-              ['Progress', `${(pct * 100).toFixed(2)}% from the anchor, `
-                + `${num(left)} blocks to go`],
-              ['Rate', blockRate > 0
-                ? `${Math.round(blockRate)} blocks/s (last minute)`
-                : 'none in the last minute'],
-              ['Average', average > 0
-                ? `${Math.round(average)} blocks/s this visit,`
-                  + ' header pauses included'
-                : 'measuring'],
-              ['ETA', chain.synced
-                ? 'synced'
-                : average > 0
-                  ? `${duration(left / average)}, at this visit's average`
-                  : 'measuring'],
-              ['This visit', `from ${num(start)}, `
-                + `${num(height - start)} blocks synced`],
-              ['Nodes known', `${pool.wtHosts.size}`]
-            ];
-
-            $('stats').replaceChildren(...stats.flatMap(([k, v]) => {
-              const dt = document.createElement('dt');
-              dt.textContent = k;
-              const dd = document.createElement('dd');
-              dd.textContent = v;
-              return [dt, dd];
-            }));
-          };
-
-          function peerCount() {
-            let n = 0;
-            for (let peer = pool.peers.head(); peer; peer = peer.next) {
-              if (peer.handshake)
-                n += 1;
-            }
-            return n;
-          }
-
-          render();
-          setInterval(render, 1000);
-        } catch (err) {
-          print(`Error: ${err.message}`, 'err');
-          setState('Failed.', err.message);
-        }
-      })();
-    </script>
+    <div id="app"></div>
+    <script src="bcash-wallet.js"></script>
   </body>
 </html>

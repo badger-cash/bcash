@@ -3,5 +3,6 @@ docs/reference/
 docker_data/
 browser/bcoin*
 browser/bcash-spv.js
+browser/bcash-wallet.js
 npm-debug.log
 coverage/

@@ -1,0 +1,327 @@
+/* eslint-env mocha */
+/* eslint prefer-arrow-callback: "off" */
+
+'use strict';
+
+/*
+ * The web wallet's engine (browser/wallet), in Node: keys sealed with a
+ * password, phrases as Cashtab derives them, the wallet file; and, over
+ * WebTransport from a regtest node, coins mined to a key, a payment seen
+ * as peers relay it, a send between keys, a token coin kept apart, and an
+ * imported key's coins found from its birth height. The last part needs
+ * the optional @fails-components/webtransport.
+ */
+
+const assert = require('bsert');
+const crypto = require('crypto');
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
+const {Vault, phraseRing} = require('../browser/wallet/vault');
+const {Coins} = require('../browser/wallet/coins');
+const {buildPayment, sendPayment, parseAddress}
+  = require('../browser/wallet/send');
+const KeyRing = require('../lib/primitives/keyring');
+const MTX = require('../lib/primitives/mtx');
+const Script = require('../lib/script/script');
+
+// localStorage, in memory.
+class Storage {
+  constructor() {
+    this.map = new Map();
+  }
+
+  getItem(key) {
+    return this.map.has(key) ? this.map.get(key) : null;
+  }
+
+  setItem(key, value) {
+    this.map.set(key, String(value));
+  }
+
+  removeItem(key) {
+    this.map.delete(key);
+  }
+}
+
+// Few PBKDF2 rounds: the tests are about what is sealed, not its cost.
+const vault = (network = 'regtest', storage = new Storage()) =>
+  new Vault({network, storage, iterations: 1000});
+
+describe('Web wallet', function() {
+  describe('vault', function() {
+    it('should seal keys with a password', async () => {
+      const storage = new Storage();
+      const v = vault('regtest', storage);
+
+      await v.create('correct horse');
+      const {address} = await v.newKey('spending', 100);
+      assert.strictEqual(v.active().name, 'spending');
+
+      // Nothing readable without the password.
+      const raw = storage.getItem('bcash-wallet-regtest');
+      assert(!raw.includes(v.active().wif));
+      assert(!raw.includes(address));
+
+      const again = vault('regtest', storage);
+      await assert.rejects(again.unlock('wrong horse'), /Wrong password/);
+      await again.unlock('correct horse');
+      assert.deepStrictEqual(again.list(), [{
+        name: 'spending',
+        type: 'wif',
+        address,
+        born: 100,
+        active: true
+      }]);
+    });
+
+    it('should derive a phrase\'s address as Cashtab does', async () => {
+      const phrase = 'beauty shoe decline spend still weird slot snack'
+        + ' coach flee between paper';
+      assert.strictEqual(phraseRing(phrase).getAddress().toString('main'),
+        'ecash:qqa9lv3kjd8vq7952p7rq0f6lkpqvlu0cydvxtd70g');
+
+      const v = vault('main');
+      await v.create('correct horse');
+      const key = await v.importText(`  ${phrase.toUpperCase()}\n`, 'cashtab');
+      assert.strictEqual(key.address,
+        'ecash:qqa9lv3kjd8vq7952p7rq0f6lkpqvlu0cydvxtd70g');
+
+      await assert.rejects(v.importText('beauty shoe decline spend still'
+        + ' weird slot snack coach flee between beauty'), /recovery phrase/);
+    });
+
+    it('should make phrases and keys, and take WIFs', async () => {
+      const v = vault();
+      await v.create('correct horse');
+
+      const made = await v.newPhrase(null, 7);
+      assert.strictEqual(made.name, 'key1');
+      assert.strictEqual(made.phrase.split(' ').length, 12);
+      assert.strictEqual(phraseRing(made.phrase).getAddress()
+        .toString('regtest'), made.address);
+
+      const ring = KeyRing.generate();
+      const wif = ring.toSecret('regtest');
+      const imported = await v.importText(wif, 'old', null);
+      assert.strictEqual(imported.address,
+        ring.getAddress().toString('regtest'));
+      await assert.rejects(v.importText(wif, 'again'), /already in/);
+      await assert.rejects(v.importText('not a key'), /Not a recovery/);
+
+      // Secrets only with the password again.
+      await assert.rejects(v.reveal('old', 'wrong horse'), /Wrong/);
+      assert.strictEqual((await v.reveal('old', 'correct horse')).wif, wif);
+      assert.strictEqual((await v.reveal('key1', 'correct horse')).phrase,
+        made.phrase);
+    });
+
+    it('should move keys and birth heights in the wallet file', async () => {
+      const a = vault();
+      await a.create('file password');
+      await a.newPhrase('first', 1234);
+      await a.newKey('second', 2000);
+      const file = a.exportFile();
+
+      const b = vault();
+      await b.create('other password');
+      await b.newKey('first', 3000);
+
+      await assert.rejects(b.importFile(file, 'bad'), /Wrong password/);
+      await assert.rejects(b.importFile('{}', 'x'), /Not a bcash wallet/);
+
+      const added = await b.importFile(file, 'file password');
+      assert.deepStrictEqual(added.map(k => k.name), ['first 2', 'second']);
+
+      const born = Object.fromEntries(b.list().map(k => [k.name, k.born]));
+      assert.deepStrictEqual(born, {
+        'first': 3000,
+        'first 2': 1234,
+        'second': 2000
+      });
+
+      // Again: nothing new.
+      assert.deepStrictEqual(await b.importFile(file, 'file password'), []);
+    });
+  });
+
+  describe('coins', function() {
+    this.timeout(90000);
+
+    let addon = null;
+    before(async function() {
+      try {
+        addon = await import('@fails-components/webtransport');
+      } catch (e) {
+        this.skip();
+      }
+    });
+
+    it('should track, receive and send over WebTransport', async () => {
+      const FullNode = require('../lib/node/fullnode');
+      const SPVNode = require('../lib/node/spvnode');
+
+      const base = 20000 + crypto.randomInt(0, 10000);
+      const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bcash-webwallet-'));
+      fs.mkdirSync(path.join(dir, 'regtest'));
+
+      const full = new FullNode({
+        network: 'regtest',
+        memory: true,
+        workers: false,
+        bip37: true,
+        listen: false,
+        httpPort: base + 1,
+        wtPort: base,
+        wtHost: '127.0.0.1'
+      });
+
+      const until = async (check, what) => {
+        for (let i = 0; i < 300 && !check(); i++)
+          await new Promise(r => setTimeout(r, 100));
+        assert(check(), `Timed out: ${what}`);
+      };
+
+      const rpc = async (method, ...params) => {
+        const json = await full.rpc.call({method, params}, {});
+        if (json.error)
+          throw new Error(json.error.message);
+        return json.result;
+      };
+
+      const others = KeyRing.generate();
+      const otherAddress = others.getAddress().toString('regtest');
+      const v = vault();
+      let spv = null;
+
+      try {
+        await full.open();
+        await full.connect();
+
+        await v.create('correct horse');
+        const a = await v.newKey('a', 0);
+        const b = await v.newKey('b', 0);
+
+        // A's coinbase, the other key's, then 100 to mature them.
+        await rpc('generatetoaddress', 1, a.address);
+        await rpc('generatetoaddress', 1, otherAddress);
+        await rpc('generatetoaddress', 100,
+          KeyRing.generate().getAddress().toString('regtest'));
+
+        const [current, next] = full.pool.wt.getHashes();
+        spv = new SPVNode({
+          network: 'regtest',
+          prefix: dir,
+          memory: false,
+          workers: false,
+          httpPort: base + 2,
+          webTransport: addon.WebTransport,
+          wtSeeds: [{host: '127.0.0.1', port: base,
+            hashes: [current.hash, next.hash]}]
+        });
+
+        // Keys watched before the node syncs: nothing slips by.
+        const coins = new Coins({vault: v, node: spv});
+        await spv.open();
+        await coins.open();
+        await spv.connect();
+        spv.startSync();
+
+        await until(() => spv.chain.height === 102, 'sync');
+        const subsidy = coins.balance(a.address).confirmed;
+        assert(subsidy > 0);
+        assert.strictEqual(coins.history(a.address).length, 1);
+
+        // Paid by someone else: seen as peers relay it, no block.
+        const prev = (await full.chain.getBlock(
+          await full.chain.getHash(2))).txs[0];
+        const pay = new MTX();
+        pay.addCoin(await full.getCoin(prev.hash(), 0));
+        pay.addOutput(parseAddress(a.address, 'regtest'), 2e8);
+        pay.addOutput(others.getAddress(), prev.outputs[0].value - 2e8 - 1000);
+        pay.sign(others);
+        await full.sendTX(pay.toTX());
+
+        await until(() => coins.balance(a.address).unconfirmed === 2e8,
+          'relayed payment');
+        assert.strictEqual(spv.chain.height, 102);
+
+        // A pays B: both see it at once, unconfirmed.
+        const {tx, fee} = await buildPayment({
+          coins,
+          ring: v.ring('a'),
+          address: a.address,
+          to: b.address.split(':')[1],
+          value: 1e8
+        });
+        await sendPayment({coins, node: spv, tx});
+
+        assert.strictEqual(coins.balance(b.address).unconfirmed, 1e8);
+        assert.strictEqual(coins.balance(a.address).total,
+          subsidy + 2e8 - 1e8 - fee);
+        assert(fee > 0 && fee < 1000);
+
+        // Mined: confirmed, for both.
+        await until(() => full.mempool.has(tx.hash()), 'mempool');
+        await rpc('generatetoaddress', 1, otherAddress);
+        await until(() => coins.balance(b.address).confirmed === 1e8,
+          'confirmed');
+        assert.strictEqual(coins.balance(a.address).unconfirmed, 0);
+        const history = coins.history(a.address);
+        assert.deepStrictEqual(history.map(h => h.net),
+          [-(1e8 + fee), 2e8, subsidy]);
+        assert(history.every(h => h.height !== -1));
+
+        // A token coin: kept apart, never spent as XEC.
+        const token = new MTX();
+        token.addInput({prevout: {hash: Buffer.alloc(32, 1), index: 0}});
+        // OP_RETURN "SLP\0" 0x01 "SEND" <token id> <100>, every field
+        // a data push.
+        token.addOutput(Script.fromRaw(Buffer.from('6a04534c500001010453454e44'
+          + '20' + '11'.repeat(32) + '080000000000000064', 'hex')), 0);
+        token.addOutput(parseAddress(b.address, 'regtest'), 546);
+        coins.addTX(token.toTX(), -1, null);
+        assert.strictEqual(coins.balance(b.address).locked, 546);
+        assert(coins.spendable(b.address).every(c => !c.token));
+        const max = await buildPayment({coins, ring: v.ring('b'),
+          address: b.address, to: otherAddress, max: true});
+        assert(max.tx.inputs.every(i => i.prevout.txid()
+          !== token.txid()));
+
+        // A key imported with its birth height: what it was paid since
+        // is found by a scan.
+        const old = KeyRing.generate();
+        const born = spv.chain.height;
+        const back = new MTX();
+        back.addCoin(await full.getCoin(pay.hash(), 1));
+        back.addOutput(old.getAddress(), 5e7);
+        back.addOutput(others.getAddress(),
+          pay.outputs[1].value - 5e7 - 1000);
+        back.sign(others);
+        await full.sendTX(back.toTX());
+        await until(() => full.mempool.has(back.hash()), 'mempool');
+        await rpc('generatetoaddress', 1, otherAddress);
+        await until(() => spv.chain.height === born + 1, 'block');
+
+        const imported = await v.importText(old.toSecret('regtest'), 'old',
+          born);
+        coins.watch(v.list().find(k => k.name === 'old'));
+        assert.strictEqual(coins.balance(imported.address).total, 0);
+        await coins.scan(born, [coins.keys.get(
+          old.getKeyHash().toString('hex'))]);
+        assert.strictEqual(coins.balance(imported.address).confirmed, 5e7);
+
+        // Sealed: back from the vault after a reload.
+        await coins.flush();
+        const reloaded = new Coins({vault: v, node: spv});
+        reloaded.state = await v.loadState();
+        assert.strictEqual(reloaded.balance(b.address).confirmed, 1e8);
+      } finally {
+        if (spv)
+          await spv.close();
+        await full.close();
+        fs.rmSync(dir, {recursive: true, force: true});
+      }
+    });
+  });
+});
