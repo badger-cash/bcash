@@ -17,6 +17,7 @@ const Network = require('../lib/protocol/network');
 const KeyRing = require('../lib/primitives/keyring');
 const MTX = require('../lib/primitives/mtx');
 const Coin = require('../lib/primitives/coin');
+const Peer = require('../lib/net/peer');
 
 const regtest = Network.get('regtest');
 
@@ -120,6 +121,70 @@ describe('Pool mempool request', function() {
       await until(() => seen.has(whileAway.txid()), 'payment while away');
       assert(!seen.has(notForUs.txid()));
     } finally {
+      if (spv)
+        await spv.close();
+      await full.close();
+    }
+  });
+
+  it('should keep a peer with nothing for its filter', async () => {
+    // A peer answers a mempool request with nothing when nothing matches:
+    // not a stall. Timeouts short, so a wrong one would show in seconds.
+    const timeouts = [Peer.RESPONSE_TIMEOUT, Peer.STALL_INTERVAL];
+    Peer.RESPONSE_TIMEOUT = 300;
+    Peer.STALL_INTERVAL = 500;
+
+    const port = 10000 + crypto.randomInt(0, 9000);
+    const full = new FullNode({
+      network: 'regtest',
+      memory: true,
+      workers: false,
+      bip37: true,
+      listen: true,
+      host: '127.0.0.1',
+      port,
+      httpPort: port + 1
+    });
+    let spv = null;
+
+    try {
+      await full.open();
+      await full.connect();
+
+      spv = new SPVNode({
+        network: 'regtest',
+        memory: true,
+        workers: false,
+        only: [`127.0.0.1:${port}`],
+        httpPort: port + 2
+      });
+
+      let asked = 0;
+      await spv.open();
+      spv.pool.watchAddress(KeyRing.generate().getAddress());
+      spv.pool.on('peer open', (peer) => {
+        const send = peer.sendMempool.bind(peer);
+        peer.sendMempool = () => {
+          asked += 1;
+          return send();
+        };
+      });
+      await spv.connect();
+      spv.startSync();
+
+      for (let i = 0; i < 100 && !(spv.pool.peers.head()
+        && spv.pool.peers.head().handshake); i++)
+        await new Promise(r => setTimeout(r, 100));
+      const first = spv.pool.peers.head();
+      assert(first && first.handshake, 'no connection');
+
+      // Many response timeouts and stall checks later: the same peer.
+      await new Promise(r => setTimeout(r, 3000));
+      assert(asked > 0, 'never asked for the mempool');
+      assert.strictEqual(spv.pool.peers.head(), first);
+      assert(!first.destroyed, 'the peer was dropped as stalling');
+    } finally {
+      [Peer.RESPONSE_TIMEOUT, Peer.STALL_INTERVAL] = timeouts;
       if (spv)
         await spv.close();
       await full.close();
