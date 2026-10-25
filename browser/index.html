@@ -342,6 +342,16 @@
         color: var(--muted);
         padding: 10px 12px;
       }
+      /* Six tabs on a phone's width. */
+      @media (max-width: 460px) {
+        nav {
+          gap: 0;
+        }
+        nav button {
+          padding: 10px 7px;
+          font-size: 0.92em;
+        }
+      }
       nav button.active {
         color: var(--fg);
         border-bottom-color: var(--accent);

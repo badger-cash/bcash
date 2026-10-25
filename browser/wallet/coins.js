@@ -32,6 +32,7 @@ const EventEmitter = require('events');
 const {BloomFilter} = require('bfilter');
 const Outpoint = require('../../lib/primitives/outpoint');
 const SLP = require('../../lib/script/slp');
+const {read} = require('./tokens');
 const consensus = require('../../lib/protocol/consensus');
 
 class Coins extends EventEmitter {
@@ -216,6 +217,9 @@ class Coins extends EventEmitter {
 
     const token = tx.outputs.length > 0
       && SLP.fromScript(tx.outputs[0].script).isValidSlp();
+    // What each output says it holds; whether it does, wallet/tokens.js
+    // decides.
+    const slp = token ? read(tx) : null;
 
     tx.outputs.forEach((output, vout) => {
       const key = this.ours(output);
@@ -231,6 +235,11 @@ class Coins extends EventEmitter {
         height,
         coinbase: tx.isCoinbase(),
         token: token && vout > 0,
+        slp: slp && slp.tokenId && vout > 0 ? {
+          tokenId: slp.tokenId,
+          amount: String(slp.amounts[vout] || 0n),
+          baton: slp.baton === vout
+        } : null,
         spent: null
       };
       touch(key.address).received += output.value;
@@ -246,6 +255,9 @@ class Coins extends EventEmitter {
       return false;
 
     record.token = token;
+    // A token transaction's raw form: what checking it walks back from.
+    if (token)
+      record.raw = tx.toRaw().toString('hex');
     this.state.txs[txid] = record;
     this.save();
     this.emit('change', txid);

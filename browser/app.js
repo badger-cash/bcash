@@ -23,8 +23,9 @@ const jsQR = require('jsqr');
 const bcash = require('./spv');
 const {Vault} = require('./wallet/vault');
 const {Coins} = require('./wallet/coins');
-const {buildPayment, sendPayment, parsePaymentURI}
-  = require('./wallet/send');
+const {Tokens} = require('./wallet/tokens');
+const {buildPayment, buildTokenPayment, sendPayment, parsePaymentURI,
+  toBase, fromBase} = require('./wallet/send');
 
 const NETWORKS = [
   {id: 'main', label: 'Mainnet', ticker: 'XEC'},
@@ -199,6 +200,7 @@ let network = NETWORKS.some(n => n.id === asked) ? asked : 'testnet';
 let anchor = bcash.newestCheckpoint(network);
 let node = null;
 let coins = null;
+let tokens = null;
 
 const net = () => NETWORKS.find(n => n.id === network);
 let ticker = net().ticker;
@@ -294,11 +296,30 @@ async function startNode() {
   });
   await tracked.open();
 
-  started.chain.on('connect', () => scheduleRender());
+  // Tokens: their coins checked as they come, and pending ones again with
+  // each block.
+  const tokenState = new Tokens({coins: tracked, node: started});
+  const recheck = () => tokenState.checkAll()
+    .catch(err => log(`Token check: ${err.message}`, 'err'));
+  tokenState.on('change', () => scheduleRender());
+  tokenState.on('error', err => log(`Tokens: ${err.message}`, 'err'));
+  tokenState.on('walk', ({lo, hi, floor}) => {
+    ui.walk = {lo, hi, floor};
+    scheduleRender();
+  });
+  tracked.on('change', recheck);
+
+  started.chain.on('connect', () => {
+    scheduleRender();
+    if (started.chain.synced)
+      recheck();
+  });
   started.chain.on('full', () => log('Synced: following the tip.'));
 
   node = started;
   coins = tracked;
+  tokens = tokenState;
+  recheck();
 
   await started.connect();
   started.startSync();
@@ -313,7 +334,10 @@ async function stopNode() {
   const [stopping, tracked] = [node, coins];
   node = null;
   coins = null;
+  tokens = null;
   ui.scans.clear();
+  ui.walk = null;
+  ui.tokenSend = null;
 
   if (tracked)
     await tracked.close();
@@ -778,7 +802,8 @@ function main() {
     : {confirmed: 0, unconfirmed: 0, locked: 0, immature: 0, total: 0};
 
   const tabs = [['wallet', 'Wallet'], ['send', 'Send'],
-    ['receive', 'Receive'], ['keys', 'Keys'], ['node', 'Node']];
+    ['receive', 'Receive'], ['tokens', 'eTokens'], ['keys', 'Keys'],
+    ['node', 'Node']];
 
   let body;
   switch (ui.tab) {
@@ -790,6 +815,9 @@ function main() {
       break;
     case 'keys':
       body = keysTab();
+      break;
+    case 'tokens':
+      body = tokensTab(key);
       break;
     case 'node':
       body = nodeTab();
@@ -866,7 +894,8 @@ function syncState() {
 
   if (peers === 0)
     return {text: 'Connecting', cls: 'wait', best};
-  if (chain.synced)
+  // The chain's own flag goes by the tip's time: at the peers' height too.
+  if (chain.synced && chain.height >= best)
     return {text: `Synced ${num(chain.height)}`, cls: 'ok', best};
 
   const span = best - anchor.height;
@@ -1033,6 +1062,209 @@ function sendTab(key, bal) {
         address: key.address, to: $('to').value, value});
       ui.send = {review: {...built, to: $('to').value.trim()}};
     })}, 'Review'));
+}
+
+/*
+ * eTokens
+ */
+
+const tokenName = token => token
+  ? (token.ticker || token.name || short(token.tokenId, 6))
+  : 'unknown';
+
+function tokensTab(key) {
+  if (!coins || !tokens)
+    return unavailable();
+
+  if (ui.tokenSend)
+    return tokenSendView(key);
+
+  const entries = tokens.balances(key.address);
+  const added = tokens.list();
+
+  const rows = [];
+
+  for (const token of added) {
+    const entry = entries.find(e => e.tokenId === token.tokenId)
+      || {valid: 0n, pending: 0n, invalid: 0n};
+    const notes = [
+      entry.pending ? `${fromBase(entry.pending, token.decimals)} being`
+        + ' checked' : null,
+      entry.invalid ? `${fromBase(entry.invalid, token.decimals)} invalid`
+        + ' (not counted)' : null
+    ].filter(Boolean).join(' · ');
+
+    rows.push(el('li', {},
+      el('div', {class: 'icon in'}, (token.ticker || '?').slice(0, 1)),
+      el('div', {class: 'what'},
+        el('div', {}, tokenName(token), el('span', {class: 'tag'},
+          `Type ${token.version}`)),
+        el('div', {class: 'muted small'}, token.name || ''),
+        notes ? el('div', {class: 'muted small'}, notes) : null),
+      el('div', {class: 'actions'},
+        el('div', {class: 'value'}, fromBase(entry.valid, token.decimals)),
+        entry.valid > 0n ? el('button', {onclick: () => {
+          ui.tokenSend = {tokenId: token.tokenId};
+          ui.error = null;
+          render();
+        }}, 'Send') : null)));
+  }
+
+  for (const entry of entries) {
+    if (entry.tokenId && tokens.get(entry.tokenId))
+      continue;
+    rows.push(el('li', {},
+      el('div', {class: 'icon'}, '?'),
+      el('div', {class: 'what'},
+        el('div', {}, entry.tokenId ? 'Unknown token' : 'Unsupported token'),
+        el('div', {class: 'mono small'}, entry.tokenId
+          ? short(entry.tokenId, 10) : 'a token type this wallet does not'
+            + ' read'),
+        el('div', {class: 'muted small'}, `${entry.coins} coin`
+          + `${entry.coins === 1 ? '' : 's'}, kept apart`)),
+      entry.tokenId ? el('div', {class: 'actions'},
+        el('button', {onclick: () => {
+          $('token-id').value = entry.tokenId;
+          $('token-height').focus();
+        }}, 'Add')) : null));
+  }
+
+  const walk = ui.walk && tokens.checking
+    ? el('p', {class: 'notice'}, 'Checking token coins: blocks'
+      + ` ${num(ui.walk.lo)} to ${num(ui.walk.hi)} (down to the genesis,`
+      + ` ${num(ui.walk.floor)}).`) : null;
+
+  return el('div', {},
+    walk,
+    rows.length > 0 ? el('ul', {class: 'history'}, ...rows)
+      : el('div', {class: 'empty'},
+        el('p', {}, 'No tokens yet.'),
+        el('p', {class: 'muted small'}, 'Add a token to see and send it.')),
+    el('div', {class: 'card'},
+      el('h2', {}, 'Add a token'),
+      el('p', {class: 'muted small'}, 'By its genesis: the token id (the'
+        + ' genesis txid) and the block it is in. The wallet checks the'
+        + ' genesis is in that block, and every coin back to it.'),
+      el('label', {for: 'token-id'}, 'Token id'),
+      el('input', {id: 'token-id', autocomplete: 'off', spellcheck: 'false',
+        class: 'mono'}),
+      el('label', {for: 'token-height'}, 'Genesis block height'),
+      el('input', {id: 'token-height', inputmode: 'numeric'}),
+      error(),
+      el('button', {class: 'primary', onclick: () => busy(async () => {
+        const height = $('token-height').value.trim();
+        if (!/^\d+$/.test(height))
+          throw new Error('The block height is a number.');
+        const token = await tokens.add($('token-id').value, Number(height));
+        $('token-id').value = '';
+        $('token-height').value = '';
+        ui.notice = `Added ${tokenName(token)}.`;
+      })}, 'Add token')));
+}
+
+function tokenSendView(key) {
+  const send = ui.tokenSend;
+  const token = tokens.get(send.tokenId);
+  const name = tokenName(token);
+  const back = () => {
+    ui.tokenSend = null;
+    ui.error = null;
+    render();
+  };
+
+  if (send.broadcasting) {
+    return el('div', {class: 'card center'},
+      el('div', {class: 'spinner', 'aria-hidden': 'true'}),
+      el('h2', {}, 'Broadcasting'),
+      el('p', {}, `Sending ${fromBase(send.amount, token.decimals)} ${name}`
+        + ' to peers.'));
+  }
+
+  if (send.sent) {
+    return el('div', {class: 'card'},
+      el('h2', {}, 'Sent'),
+      el('p', {}, `${fromBase(send.amount, token.decimals)} ${name} is on`
+        + ' its way.'),
+      el('a', {class: 'mono small txid', href: explorer(send.sent),
+        target: '_blank', rel: 'noopener'}, send.sent),
+      el('button', {onclick: back}, 'Done'));
+  }
+
+  if (send.review) {
+    const {tx, fee} = send.review;
+    return el('div', {class: 'card'},
+      el('h2', {}, 'Review'),
+      el('dl', {},
+        el('dt', {class: 'full'}, 'To'),
+        el('dd', {class: 'mono one-line'}, send.to),
+        el('dt', {}, 'Amount'),
+        el('dd', {}, `${fromBase(send.amount, token.decimals)} ${name}`),
+        el('dt', {}, 'Fee'), el('dd', {}, `${xec(fee)} ${ticker}`)),
+      error(),
+      el('div', {class: 'row'},
+        el('button', {onclick: () => {
+          send.review = null;
+          render();
+        }}, 'Back'),
+        el('button', {class: 'primary', onclick: () => busy(async () => {
+          send.broadcasting = true;
+          render();
+          try {
+            await sendPayment({coins, node, tx});
+          } finally {
+            send.broadcasting = false;
+          }
+          send.review = null;
+          send.sent = tx.txid();
+          log(`Sent ${fromBase(send.amount, token.decimals)} ${name}:`
+            + ` ${tx.txid()}.`);
+          tokens.checkAll();
+        })}, 'Send')));
+  }
+
+  const have = tokens.spendable(key.address, send.tokenId)
+    .reduce((s, c) => s + BigInt(c.slp.amount), 0n);
+
+  const scan = () => busy(async () => {
+    const text = await scanCode();
+    if (text == null)
+      return;
+    $('token-to').value = parsePaymentURI(text.split('?')[0],
+      network).address;
+  });
+
+  return el('div', {class: 'card'},
+    el('h2', {}, `Send ${name}`),
+    el('label', {for: 'token-to'}, 'To'),
+    el('div', {class: 'row'},
+      el('input', {id: 'token-to', placeholder: network === 'main'
+        ? 'ecash:...' : 'ectest:...', autocomplete: 'off',
+      spellcheck: 'false'}),
+      navigator.mediaDevices && navigator.mediaDevices.getUserMedia
+        ? qrButton(scan) : null),
+    el('label', {for: 'token-amount'}, `Amount (${name})`),
+    el('div', {class: 'row'},
+      el('input', {id: 'token-amount', inputmode: 'decimal',
+        placeholder: fromBase(0n, token.decimals)}),
+      el('button', {onclick: () => {
+        $('token-amount').value = fromBase(have, token.decimals);
+      }}, 'Max')),
+    el('p', {class: 'muted small'}, `Verified: ${fromBase(have,
+      token.decimals)} ${name}. The fee is paid in ${ticker}.`),
+    error(),
+    el('div', {class: 'row'},
+      el('button', {onclick: back}, 'Cancel'),
+      el('button', {class: 'primary', onclick: () => busy(async () => {
+        const amount = toBase($('token-amount').value, token.decimals);
+        if (!amount)
+          throw new Error(`Enter an amount, with up to ${token.decimals}`
+            + ' decimals.');
+        const to = $('token-to').value.trim();
+        const built = await buildTokenPayment({coins, tokens,
+          ring: vault.ring(), address: key.address, to,
+          tokenId: send.tokenId, amount});
+        Object.assign(send, {review: built, amount, to});
+      })}, 'Review')));
 }
 
 /**

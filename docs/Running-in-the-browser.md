@@ -72,6 +72,12 @@ The wallet (`browser/app.js`, on `browser/wallet/`):
 - **The wallet file**: every key, phrase and birth height, encrypted with
   the password. Imported in another browser, it restores the wallet with a
   fast sync.
+- **eTokens**: SLP Token Types 1 and 2, added by their genesis (its txid,
+  the token id, and the height of its block, which the wallet checks it
+  is in). Each token coin is checked as bcash's SLP indexer checks it,
+  walking back through its parents to the genesis, those unconfirmed
+  fetched from peers' mempools, so tokens, as XEC, can be spent unconfirmed.
+  Sending a token spends only its own checked coins.
 - **Coins** as peers relay them, then confirmed in blocks; history; sending
   XEC at 1 sat a byte, to an address typed, pasted or scanned from a QR code
   with the camera (an amount in it, `?amount=12.34`, fills in too). A coin from a transaction carrying SLP is kept apart
