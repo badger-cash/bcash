@@ -18,7 +18,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const {Vault, phraseRing} = require('../browser/wallet/vault');
-const {Coins} = require('../browser/wallet/coins');
+const {Coins, STATE_VERSION} = require('../browser/wallet/coins');
 const {buildPayment, sendPayment, parseAddress, parsePaymentURI}
   = require('../browser/wallet/send');
 const KeyRing = require('../lib/primitives/keyring');
@@ -254,38 +254,38 @@ describe('Web wallet', function() {
   });
 
   describe('coins kept before', function() {
-    it('should take a token transaction\'s change as XEC', async () => {
-      const v = vault();
-      await v.create('correct horse');
-      await v.newKey('a', {network: 'regtest', height: 0});
-      const {address} = v.list('regtest')[0];
+    it('should rebuild a state from before spends came in any order',
+      async () => {
+        const v = vault();
+        await v.create('correct horse');
+        await v.newKey('a', {network: 'regtest', height: 3});
+        const {address} = v.list('regtest')[0];
 
-      // As the first token wallet kept a token send's outputs: all apart,
-      // the change among them, given 0 tokens.
-      const coin = (vout, amount) => ({
-        txid: '11'.repeat(32), vout, value: 1000 * vout, script: '',
-        address, height: 5, coinbase: false, token: true, spent: null,
-        slp: {tokenId: '22'.repeat(32), amount, baton: false}
+        // As kept before: no version, a coin it may have wrongly left
+        // unspent, a token and a verdict.
+        await v.saveState('regtest', {
+          coins: {x: {txid: '11'.repeat(32), vout: 1, value: 1000, address,
+            height: 5, token: false, spent: null}},
+          txs: {}, covered: {[address]: true}, synced: 5,
+          tokens: {t: {tokenId: 't'}}, slpValid: {y: true}
+        });
+
+        const node = {
+          network: {type: 'regtest'},
+          chain: {height: 5},
+          pool: {watch() {}},
+          on() {}
+        };
+        const coins = new Coins({vault: v, node});
+        await coins.open();
+
+        assert.deepStrictEqual(coins.state.coins, {});
+        assert.strictEqual(coins.state.version, STATE_VERSION);
+        assert.deepStrictEqual(coins.uncovered().map(k => k.address),
+          [address]);
+        assert.deepStrictEqual(coins.state.tokens, {t: {tokenId: 't'}});
+        assert.deepStrictEqual(coins.state.slpValid, {y: true});
       });
-      await v.saveState('regtest', {
-        coins: {a: coin(1, '5'), b: coin(2, '0')},
-        txs: {}, covered: {}, synced: 5
-      });
-
-      const node = {
-        network: {type: 'regtest'},
-        chain: {height: 5},
-        pool: {watch() {}},
-        on() {}
-      };
-      const coins = new Coins({vault: v, node});
-      await coins.open();
-
-      assert.strictEqual(coins.state.coins.a.token, true);
-      assert.strictEqual(coins.state.coins.b.token, false);
-      assert.deepStrictEqual(coins.spendable(address).map(c => c.vout), [2]);
-      assert.strictEqual(coins.balance(address).locked, 1000);
-    });
   });
 
   describe('coins', function() {

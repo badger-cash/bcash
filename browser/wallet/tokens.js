@@ -204,6 +204,8 @@ class Tokens extends EventEmitter {
     super();
     this.coins = coins;
     this.node = node;
+    // Blocks at any height, below the chain's anchor too.
+    this.blocks = coins.blocks;
     this.heightOf = heightOf;
     this.checking = null;
     // Tokens asked of the hint this session, and what came of it.
@@ -245,10 +247,6 @@ class Tokens extends EventEmitter {
     if (this.state.tokens[tokenId])
       return this.state.tokens[tokenId];
 
-    const anchor = this.node.chain.options.anchor;
-    const floor = anchor ? anchor.height + 1 : 0;
-    assert(height >= floor, `This wallet's chain starts at ${floor}: a`
-      + ' token made before that cannot be checked yet.');
     assert(height <= this.node.chain.height,
       'The wallet has not synced to that block yet.');
 
@@ -925,14 +923,14 @@ class Tokens extends EventEmitter {
 
       this.emit('walk', {lo, hi, floor, wanted: wanted.size});
 
-      await this.node.pool.scanRange({start: lo, end: hi, filter},
-        (entry, block) => {
-          for (const tx of block.txs) {
+      await this.blocks.scanBlocks({start: lo, end: hi, filter},
+        (entry, merkle) => {
+          for (const tx of merkle.txs) {
             const txid = tx.txid();
             if (!wanted.has(txid))
               continue;
             wanted.delete(txid);
-            const block = entry.rhash();
+            const block = Buffer.from(entry.hash).reverse().toString('hex');
             found.set(txid, {tx, height: entry.height, block});
             this.state.slpTXs[txid] = {
               raw: tx.toRaw().toString('hex'),

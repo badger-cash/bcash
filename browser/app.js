@@ -399,25 +399,37 @@ async function switchNetwork(id) {
 }
 
 /**
- * Where a key's scan starts on this network: its birth height here; else
- * the block made when it was (by block times); else the anchor.
+ * Where a key's scan starts on this network: its birth height here, below
+ * the chain's anchor too; else the block made when it was (by block
+ * times); else the anchor, and the key's birth asked for.
  */
 
 async function startFor(key) {
-  const floor = anchor.height + 1;
-
   if (key.born != null)
-    return Math.max(key.born, floor);
+    return key.born;
 
   if (key.created != null) {
     const height = await heightAt(key.created / 1000 - 2 * 60 * 60);
     await vault.setBorn(key.name, network, height);
-    return Math.max(height, floor);
+    return height;
   }
 
-  ui.notice = `${key.name}: scanning from checkpoint ${num(anchor.height)}.`
-    + ' Coins it held only before that are not found yet.';
-  return floor;
+  ui.notice = `${key.name}: its first block is not known, so it is scanned`
+    + ` from checkpoint ${num(anchor.height)}. For older coins, give the`
+    + ' block it was made at under Keys.';
+  return anchor.height + 1;
+}
+
+/**
+ * Scan a key's history again, from an earlier block: its birth, found.
+ */
+
+function scanFrom(key, height) {
+  const tracked = coins;
+  return vault.setBorn(key.name, network, height)
+    .then(() => tracked.rescan(key, height))
+    .then(() => log(`Scan for ${key.name} from ${num(height)} done.`))
+    .catch(err => log(`Scan for ${key.name}: ${err.message}`, 'err'));
 }
 
 /**
@@ -1394,7 +1406,25 @@ function keysTab() {
         el('div', {class: 'mono small'}, k.address),
         el('div', {class: 'muted small'}, k.born != null
           ? `Made at ${net().label} block ${num(k.born)}`
-          : `Made at: not known on ${net().label}`)),
+          : `Made at: not known on ${net().label}`),
+        // Imported keys: their history may reach back past what was
+        // scanned.
+        k.type && !k.created ? el('div', {class: 'row scan-from'},
+          el('input', {id: `scan-${k.name}`, inputmode: 'numeric',
+            placeholder: 'Scan earlier, from block'}),
+          el('button', {onclick: () => busy(async () => {
+            const height = $(`scan-${k.name}`).value.trim();
+            if (!/^\d+$/.test(height))
+              throw new Error('The block height is a number.');
+            if (!coins)
+              throw new Error('Not syncing this network.');
+            if (Number(height) > node.chain.height)
+              throw new Error('That block is not reached yet.');
+            $(`scan-${k.name}`).value = '';
+            ui.notice = `Scanning ${k.name}'s history from block`
+              + ` ${num(Number(height))}.`;
+            scanFrom(k, Number(height));
+          })}, 'Scan')) : null),
       el('div', {class: 'actions'},
         k.active ? null : el('button', {onclick: () => busy(
           () => vault.use(k.name))}, 'Use'),

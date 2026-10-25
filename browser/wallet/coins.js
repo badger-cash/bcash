@@ -15,7 +15,14 @@
  * The node's filter holds each key's public key hash (what pays it) and
  * public key (what spends from it). Blocks the wallet has not seen, after
  * a reload or for a key imported with a birth height, are scanned on
- * connections of their own (pool.scanRange), from that height to the tip.
+ * connections of their own, from that height to the tip: below the
+ * chain's anchor too, by headers proven between checkpoints
+ * (wallet/history.js).
+ *
+ * A block orders its transactions by txid, so a child may come before the
+ * parent it spends: a block's are taken parents first, and every spend of
+ * a transaction kept is remembered, so a coin found after the transaction
+ * spending it (an older block, scanned later) is spent on arrival.
  *
  * A coin carrying tokens, as its transaction's SLP data says (or of a
  * token type not read, to be safe), is kept apart, never spent as XEC, so
@@ -35,7 +42,43 @@ const {BloomFilter} = require('bfilter');
 const Outpoint = require('../../lib/primitives/outpoint');
 const SLP = require('../../lib/script/slp');
 const {read, holding} = require('./tokens');
+const {History} = require('./history');
 const consensus = require('../../lib/protocol/consensus');
+
+// What the state is: before 2, spends a block listed before their coins
+// were missed; such a state is rebuilt, by a scan from each key's birth.
+const STATE_VERSION = 2;
+
+/**
+ * A block's transactions, parents before the children spending them (a
+ * block's own order is by txid).
+ * @param {TX[]} txs
+ * @returns {TX[]}
+ */
+
+function inOrder(txs) {
+  const byID = new Map(txs.map(tx => [tx.txid(), tx]));
+  const done = new Set();
+  const out = [];
+
+  const visit = (tx) => {
+    const txid = tx.txid();
+    if (done.has(txid))
+      return;
+    done.add(txid);
+    for (const input of tx.inputs) {
+      const parent = byID.get(input.prevout.txid());
+      if (parent)
+        visit(parent);
+    }
+    out.push(tx);
+  };
+
+  for (const tx of txs)
+    visit(tx);
+
+  return out;
+}
 
 class Coins extends EventEmitter {
   /**
@@ -44,10 +87,12 @@ class Coins extends EventEmitter {
    * @param {SPVNode} options.node
    */
 
-  constructor({vault, node}) {
+  constructor({vault, node, blocks = null}) {
     super();
     this.vault = vault;
     this.node = node;
+    // Blocks at any height, below the chain's anchor too.
+    this.blocks = blocks || new History({node});
     this.network = node.network.type;
     this.closed = false;
     this.keys = new Map();
@@ -62,8 +107,10 @@ class Coins extends EventEmitter {
 
   async open() {
     this.state = await this.vault.loadState(this.network) || {
+      version: STATE_VERSION,
       coins: {},
       txs: {},
+      spends: {},
       covered: {},
       synced: null
     };
@@ -71,14 +118,16 @@ class Coins extends EventEmitter {
     if (!this.state.covered)
       this.state.covered = {};
 
-    // Kept apart before outputs' tokens were read: a coin its token data
-    // gives none (a token transaction's change) is plain XEC.
-    for (const coin of Object.values(this.state.coins)) {
-      if (coin.token && coin.slp && BigInt(coin.slp.amount) === 0n
-          && !coin.slp.baton) {
-        coin.token = false;
-        coin.slp = null;
-      }
+    // Kept before spends were taken in any order: rebuilt, each key's
+    // history scanned again from its birth. Tokens and their verdicts
+    // stay.
+    if (this.state.version !== STATE_VERSION) {
+      this.state.version = STATE_VERSION;
+      this.state.coins = {};
+      this.state.txs = {};
+      this.state.spends = {};
+      this.state.covered = {};
+      this.rebuilding = true;
     }
 
     const fresh = this.state.synced == null;
@@ -120,6 +169,21 @@ class Coins extends EventEmitter {
     if (this.closed)
       return;
 
+    this.state.covered[key.address] = true;
+    this.save();
+  }
+
+  /**
+   * Scan a key's history again from `start`: an imported key, its birth
+   * found to be earlier than first said.
+   */
+
+  async rescan(key, start) {
+    const entry = this.keys.get(this.vault.ring(key.name)
+      .getKeyHash('hex'));
+    await this.scan(start, [entry]);
+    if (this.closed)
+      return;
     this.state.covered[key.address] = true;
     this.save();
   }
@@ -167,7 +231,7 @@ class Coins extends EventEmitter {
   }
 
   addBlock(entry, block) {
-    for (const tx of block.txs || [])
+    for (const tx of inOrder(block.txs || []))
       this.addTX(tx, entry.height, entry.time);
 
     if (this.state.synced == null || entry.height > this.state.synced)
@@ -184,23 +248,20 @@ class Coins extends EventEmitter {
   addTX(tx, height, time) {
     const txid = tx.txid();
     const known = this.state.txs[txid];
+    let changed = false;
 
-    if (known) {
+    if (known && height !== -1 && known.height !== height) {
       // Seen unconfirmed, now in a block (or again unconfirmed).
-      if (height !== -1 && known.height !== height) {
-        known.height = height;
-        known.time = time;
-        for (const coin of Object.values(this.state.coins)) {
-          if (coin.txid === txid)
-            coin.height = height;
-        }
-        this.save();
-        this.emit('change', txid);
+      known.height = height;
+      known.time = time;
+      for (const coin of Object.values(this.state.coins)) {
+        if (coin.txid === txid)
+          coin.height = height;
       }
-      return true;
+      changed = true;
     }
 
-    const record = {
+    const record = known || {
       txid,
       height,
       time: time || Math.floor(Date.now() / 1000),
@@ -215,8 +276,10 @@ class Coins extends EventEmitter {
       return record.keys[address];
     };
 
-    let touched = false;
+    let touched = Boolean(known);
 
+    // Its spends of our coins: of those known now, even if it was known
+    // before them.
     for (const input of tx.inputs) {
       const prev = `${input.prevout.txid()}:${input.prevout.index}`;
       const coin = this.state.coins[prev];
@@ -225,6 +288,7 @@ class Coins extends EventEmitter {
       coin.spent = txid;
       touch(coin.address).spent += coin.value;
       touched = true;
+      changed = true;
     }
 
     const token = tx.outputs.length > 0
@@ -238,10 +302,14 @@ class Coins extends EventEmitter {
       if (!key)
         return;
 
+      const id = `${txid}:${vout}`;
+      if (this.state.coins[id])
+        return;
+
       const held = token ? holding(slpRecord, vout)
         : {token: false, slp: null};
 
-      this.state.coins[`${txid}:${vout}`] = {
+      const coin = {
         txid,
         vout,
         value: output.value,
@@ -253,25 +321,48 @@ class Coins extends EventEmitter {
         slp: held.slp,
         spent: null
       };
+      this.state.coins[id] = coin;
       touch(key.address).received += output.value;
 
-      // Its spend, in the node's filter: the filter also updates itself
-      // on a match, but a scan's does not.
-      this.node.pool.watchOutpoint(new Outpoint(tx.hash(), vout));
+      // Spent already, by a transaction seen before this coin was.
+      const spender = this.state.spends[id];
+      if (spender && this.state.txs[spender]) {
+        coin.spent = spender;
+        const by = this.state.txs[spender];
+        if (!by.keys[key.address])
+          by.keys[key.address] = {received: 0, spent: 0};
+        by.keys[key.address].spent += coin.value;
+      } else {
+        // Its spend, in the node's filter: the filter also updates itself
+        // on a match, but a scan's does not.
+        this.node.pool.watchOutpoint(new Outpoint(tx.hash(), vout));
+      }
 
       touched = true;
+      changed = true;
     });
 
     if (!touched)
       return false;
 
-    record.token = token;
-    // A token transaction's raw form: what checking it walks back from.
-    if (token)
-      record.raw = tx.toRaw().toString('hex');
-    this.state.txs[txid] = record;
-    this.save();
-    this.emit('change', txid);
+    if (!known) {
+      record.token = token;
+      // A token transaction's raw form: what checking it walks back from.
+      if (token)
+        record.raw = tx.toRaw().toString('hex');
+      this.state.txs[txid] = record;
+
+      // What it spends, for a coin of ours found after it.
+      for (const input of tx.inputs) {
+        this.state.spends[`${input.prevout.txid()}:${input.prevout.index}`]
+          = txid;
+      }
+    }
+
+    if (changed || !known) {
+      this.save();
+      this.emit('change', txid);
+    }
 
     return true;
   }
@@ -336,8 +427,8 @@ class Coins extends EventEmitter {
 
     this.emit('scan', {start, end, height: start - 1});
 
-    await this.node.pool.scanRange({start, end, filter}, (entry, block) => {
-      for (const tx of block.txs)
+    await this.blocks.scanBlocks({start, end, filter}, (entry, block) => {
+      for (const tx of inOrder(block.txs))
         this.addTX(tx, entry.height, entry.time);
       this.emit('scan', {start, end, height: entry.height});
     });
@@ -466,3 +557,5 @@ class Coins extends EventEmitter {
 }
 
 exports.Coins = Coins;
+exports.inOrder = inOrder;
+exports.STATE_VERSION = STATE_VERSION;

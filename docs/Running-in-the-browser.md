@@ -94,8 +94,14 @@ The wallet (`browser/app.js`, on `browser/wallet/`):
   XEC at 1 sat a byte, to an address typed, pasted or scanned from a QR code
   with the camera (an amount in it, `?amount=12.34`, fills in too). A coin from a transaction carrying SLP is kept apart
   and never spent as XEC, so a payment cannot burn a token.
-- Its chain starts at the newest checkpoint built in, so coins a key held
-  only before that block are not found yet.
+- Its chain starts at the newest checkpoint built in. What an imported key
+  held before that, or a token's history from before it, is still found:
+  the blocks below are scanned by their hashes, proven by headers fetched
+  between the checkpoints built into bcash, each building on the one
+  before, the last the next checkpoint (`browser/wallet/history.js`). An
+  imported key scans from the block it was made at; one whose block is not
+  known scans from the newest checkpoint, and from an earlier block on
+  request (Keys, Scan earlier).
 
 In a page of your own:
 
