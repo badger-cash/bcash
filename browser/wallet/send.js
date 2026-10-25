@@ -22,6 +22,7 @@ const Coin = require('../../lib/primitives/coin');
 const MTX = require('../../lib/primitives/mtx');
 const Script = require('../../lib/script/script');
 const SLP = require('../../lib/script/slp');
+const TX = require('../../lib/primitives/tx');
 const policy = require('../../lib/protocol/policy');
 
 // 1 sat a byte: the relay minimum on eCash.
@@ -290,12 +291,53 @@ async function buildTokenPayment({coins, tokens, ring, address, to, tokenId,
 }
 
 /**
- * Send it: to peers, and into the wallet at once, unconfirmed.
+ * Whether the node has a peer to send to.
+ */
+
+function connected(node) {
+  for (let peer = node.pool.peers.head(); peer; peer = peer.next) {
+    if (peer.handshake && !peer.destroyed)
+      return true;
+  }
+  return false;
+}
+
+/**
+ * Send it to peers, and once one has taken it, into the wallet,
+ * unconfirmed. Not taken, it is not kept: the coins stay as they were.
  */
 
 async function sendPayment({coins, node, tx}) {
-  coins.addTX(tx, -1, null);
-  await node.sendTX(tx);
+  if (!connected(node))
+    throw new Error('Not connected to a node: nothing was sent.');
+
+  try {
+    // Done when a peer asks for it; fails if none does in time.
+    await node.pool.broadcast(tx);
+  } catch (e) {
+    throw new Error(`Not sent: ${e.message}`);
+  }
+
+  coins.addSent(tx);
+}
+
+/**
+ * Send again a payment the network lost: kept whole when it was sent.
+ */
+
+async function resendPayment({coins, node, raw}) {
+  const tx = TX.fromRaw(Buffer.from(raw, 'hex'));
+
+  if (!connected(node))
+    throw new Error('Not connected to a node: nothing was sent.');
+
+  try {
+    await node.pool.broadcast(tx);
+  } catch (e) {
+    throw new Error(`Not sent: ${e.message}`);
+  }
+
+  coins.setUnsent(tx.txid(), false);
 }
 
 exports.RATE = RATE;
@@ -308,3 +350,5 @@ exports.toSats = toSats;
 exports.fromBase = fromBase;
 exports.DUST = DUST;
 exports.sendPayment = sendPayment;
+exports.resendPayment = resendPayment;
+exports.connected = connected;

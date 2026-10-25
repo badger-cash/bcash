@@ -24,8 +24,8 @@ const {Vault} = require('./wallet/vault');
 const {Coins} = require('./wallet/coins');
 const {Tokens} = require('./wallet/tokens');
 const {lookupHeight, CHRONIK} = require('./wallet/chronik');
-const {buildPayment, buildTokenPayment, sendPayment, parsePaymentURI,
-  toBase, toSats, fromBase} = require('./wallet/send');
+const {buildPayment, buildTokenPayment, sendPayment, resendPayment,
+  parsePaymentURI, toBase, toSats, fromBase} = require('./wallet/send');
 
 const NETWORKS = [
   {id: 'main', label: 'Mainnet', ticker: 'XEC'},
@@ -330,8 +330,15 @@ async function startNode() {
 
   started.chain.on('connect', () => {
     scheduleRender();
-    if (started.chain.synced)
+    if (started.chain.synced) {
       recheck();
+      checkSends();
+    }
+  });
+  started.chain.on('full', () => checkSends());
+  started.pool.on('peer open', () => {
+    if (started.chain.synced)
+      checkSends();
   });
   started.chain.on('full', () => log('Synced: following the tip.'));
 
@@ -347,6 +354,41 @@ async function startNode() {
   coins.catchUp().catch(err => log(`Scan: ${err.message}`, 'err'));
   for (const key of coins.uncovered())
     cover(key);
+}
+
+/**
+ * The wallet's sends no node has: marked "not sent", to send again or
+ * cancel. A node without one says so (notfound); one that has it sends it.
+ */
+
+let checkingSends = null;
+
+function checkSends() {
+  if (checkingSends || !coins || !tokens)
+    return checkingSends;
+
+  const [tracked, tokenState] = [coins, tokens];
+
+  checkingSends = (async () => {
+    const pending = tracked.pending();
+    if (pending.length === 0)
+      return;
+    const {found, asked} = await tokenState.fetchMempool(
+      pending.map(tx => tx.txid));
+    if (!asked)
+      return;
+    for (const tx of pending) {
+      const now = tracked.state.txs[tx.txid];
+      if (now && now.height === -1)
+        tracked.setUnsent(tx.txid, !found.has(tx.txid));
+    }
+  })().catch((err) => {
+    log(`Checking sends: ${err.message}`, 'err');
+  }).finally(() => {
+    checkingSends = null;
+  });
+
+  return checkingSends;
 }
 
 async function stopNode() {
@@ -1030,18 +1072,52 @@ function walletTab(key) {
       tags.push(movement ? 'unknown token' : 'token');
     }
 
+    // No node has it: send it again, or undo it.
+    const unsent = tx.unsent && tx.height === -1;
+
     return el('li', {},
       el('div', {class: `icon ${sent ? 'out' : 'in'}`}, sent ? '↑' : '↓'),
       el('div', {class: 'what'},
         el('div', {}, label,
+          unsent ? el('span', {class: 'tag warn'}, 'not sent') : null,
           ...tags.map(t => el('span', {class: 'tag'}, t))),
         el('div', {class: 'muted small'}, `${date} · ${status}`),
         el('a', {class: 'small mono', href: explorer(tx.txid),
           target: '_blank', rel: 'noopener'}, short(tx.txid))),
       el('div', {class: 'actions'},
         el('div', {class: `value ${sent ? 'out' : 'in'}`}, value),
-        detail ? el('div', {class: 'muted small right'}, detail) : null));
+        detail ? el('div', {class: 'muted small right'}, detail) : null,
+        unsent && tx.raw ? el('button', {onclick: () => busy(async () => {
+          await resendPayment({coins, node, raw: tx.raw});
+          log(`Sent again: ${tx.txid}.`);
+          setTimeout(checkSends, 5000);
+        })}, 'Retry') : null,
+        unsent ? el('button', {class: 'danger',
+          onclick: () => cancelSend(tx)}, 'Cancel') : null));
   }));
+}
+
+/**
+ * Undo a send no node has, once asked: its coins come back.
+ */
+
+function cancelSend(tx) {
+  ui.modal = () => el('div', {class: 'modal'},
+    el('div', {class: 'card narrow'},
+      el('h2', {}, 'Cancel this send?'),
+      el('p', {class: 'muted'}, 'No node has this transaction, so it was'
+        + ' never sent. Cancelling removes it from the wallet and makes its'
+        + ' coins spendable again.'),
+      el('p', {class: 'small mono'}, short(tx.txid)),
+      error(),
+      el('div', {class: 'row'},
+        el('button', {onclick: closeModal}, 'Keep it'),
+        el('button', {class: 'danger', onclick: () => busy(async () => {
+          coins.removeTX(tx.txid);
+          log(`Cancelled: ${tx.txid}.`);
+          closeModal();
+        })}, 'Cancel send'))));
+  render();
 }
 
 function sendTab(key, bal) {
@@ -1103,6 +1179,8 @@ function sendTab(key, bal) {
           }
           ui.send = {sent: {txid: tx.txid(), value}};
           log(`Sent ${xec(value)} ${ticker}: ${tx.txid()}.`);
+          // Taken, but kept? A node that refused it has it not.
+          setTimeout(checkSends, 5000);
         })}, 'Send')));
   }
 
@@ -1324,6 +1402,7 @@ function tokenSendView(key) {
           log(`Sent ${fromBase(send.amount, token.decimals)} ${name}:`
             + ` ${tx.txid()}.`);
           tokens.checkAll();
+          setTimeout(checkSends, 5000);
         })}, 'Send')));
   }
 

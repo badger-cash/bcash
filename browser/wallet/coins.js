@@ -273,6 +273,12 @@ class Coins extends EventEmitter {
       changed = true;
     }
 
+    // A peer relayed it, or a block holds it: sent after all.
+    if (known && known.unsent) {
+      known.unsent = false;
+      changed = true;
+    }
+
     const record = known || {
       txid,
       height,
@@ -376,6 +382,83 @@ class Coins extends EventEmitter {
       this.emit('change', txid);
     }
 
+    return true;
+  }
+
+  /**
+   * Take a payment this wallet sent: kept whole, so it can be sent again
+   * if the network loses it.
+   */
+
+  addSent(tx) {
+    this.addTX(tx, -1, null);
+    const record = this.state.txs[tx.txid()];
+    if (record && !record.raw) {
+      record.raw = tx.toRaw().toString('hex');
+      this.save();
+    }
+  }
+
+  /**
+   * The wallet's own sends not yet in a block: unconfirmed transactions
+   * spending its coins.
+   */
+
+  pending() {
+    return Object.values(this.state.txs).filter(tx => tx.height === -1
+      && Object.values(tx.keys).some(k => k.spent > 0));
+  }
+
+  /**
+   * Mark a send as one no node has (or has again).
+   */
+
+  setUnsent(txid, unsent) {
+    const record = this.state.txs[txid];
+    if (!record || Boolean(record.unsent) === unsent)
+      return;
+    record.unsent = unsent;
+    this.save();
+    this.emit('change', txid);
+  }
+
+  /**
+   * Undo an unconfirmed transaction the network does not have: the coins
+   * it spent are ours again, the coins it made are gone, and so is any
+   * unconfirmed transaction spending them.
+   * @returns {Boolean} whether it was known.
+   */
+
+  removeTX(txid) {
+    const record = this.state.txs[txid];
+    if (!record)
+      return false;
+
+    if (record.height !== -1)
+      throw new Error('A transaction in a block cannot be cancelled.');
+
+    // What spends its coins first: it cannot stand without them.
+    for (const coin of Object.values(this.state.coins)) {
+      if (coin.txid === txid && coin.spent)
+        this.removeTX(coin.spent);
+    }
+
+    for (const [id, coin] of Object.entries(this.state.coins)) {
+      if (coin.txid === txid)
+        delete this.state.coins[id];
+      else if (coin.spent === txid)
+        coin.spent = null;
+    }
+
+    for (const [prev, by] of Object.entries(this.state.spends)) {
+      if (by === txid)
+        delete this.state.spends[prev];
+    }
+
+    delete this.state.txs[txid];
+
+    this.save();
+    this.emit('change', txid);
     return true;
   }
 
@@ -529,7 +612,9 @@ class Coins extends EventEmitter {
           time: tx.time,
           seen: tx.seen,
           net: received - spent,
-          token: Boolean(tx.token)
+          token: Boolean(tx.token),
+          unsent: Boolean(tx.unsent),
+          raw: tx.raw || null
         };
       })
       .sort((a, b) => {
