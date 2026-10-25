@@ -146,8 +146,14 @@ includes every language.
 ### Hosting
 
 Copy `index.html`, `bcash-wallet.js` and `bcash-scan.js`, with their `.br`
-and `.gz` copies, to any static web server. It must serve the page over
-**HTTPS**, because browsers allow WebTransport only on secure pages.
+and `.gz` copies, to any static web server, along with the icons
+(`favicon.ico`, `apple-touch-icon.png`) and the link preview image
+(`share-card.jpg`). It must serve the page over **HTTPS**, because browsers
+allow WebTransport only on secure pages.
+
+Social sites need the preview image's full URL, so `index.html` names it at
+`https://webnode.badger.cash/share-card.jpg`. If you host the page
+elsewhere, change the `og:image` tag to your own address.
 
 No special server is required:
 
