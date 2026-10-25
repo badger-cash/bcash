@@ -1666,6 +1666,48 @@ window.addEventListener('beforeunload', () => {
     coins.flush();
 });
 
+/*
+ * Back in view, or back online. A phone suspends a page in the background,
+ * and its connections can die there without a word: the page would go on
+ * thinking it is connected. Each peer must answer a ping within a few
+ * seconds or is dropped, and the pool dials what it is short of.
+ */
+
+const WAKE_PING_MS = 5000;
+
+function wake() {
+  if (!node)
+    return;
+
+  const {pool} = node;
+  const asked = Date.now();
+
+  for (let peer = pool.peers.head(); peer; peer = peer.next) {
+    if (!peer.handshake)
+      continue;
+    peer.sendPing();
+    setTimeout(() => {
+      if (!peer.destroyed && peer.lastPong < asked) {
+        log(`No answer from ${peer.hostname()}: reconnecting.`);
+        peer.destroy();
+      }
+    }, WAKE_PING_MS);
+  }
+
+  if (pool.connected && !pool.peers.load)
+    pool.fillOutbound();
+}
+
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible')
+    wake();
+});
+window.addEventListener('online', wake);
+window.addEventListener('pageshow', (e) => {
+  if (e.persisted)
+    wake();
+});
+
 if (typeof WebTransport !== 'function') {
   $('app').replaceChildren(el('div', {class: 'card narrow'},
     el('h1', {}, 'bcash wallet'),
