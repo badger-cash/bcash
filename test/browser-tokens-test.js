@@ -6,10 +6,12 @@
 /*
  * The web wallet's tokens (browser/wallet/tokens.js), over WebTransport
  * from a regtest node, checked as bcash's SLP indexer checks them: Type 1
- * coins valid once their token is added, an overspending SEND invalid
- * (nodes relay and mine it all the same), an unconfirmed chain valid with
- * its parents from the node's mempool and spent on at zero conf; Type 2
- * MINTs valid only drawing on their vault.
+ * coins valid once their token is added; a SEND claiming tokens no parent
+ * found holds unproven, one its found parents fall short of invalid (nodes
+ * relay and mine both all the same); an unconfirmed chain valid with its
+ * parents from the node's mempool and spent on at zero conf; Type 1 MINTs
+ * valid down their baton's chain, and not without it; Type 2 MINTs valid
+ * only drawing on their vault.
  * Needs the optional @fails-components/webtransport.
  */
 
@@ -152,7 +154,7 @@ describe('Web wallet tokens', function() {
       const a = await vault.newKey('a', {network: 'regtest', height: 0});
       const b = await vault.newKey('b', {network: 'regtest', height: 0});
 
-      await rpc('generatetoaddress', 5, issuerAddress.toString('regtest'));
+      await rpc('generatetoaddress', 8, issuerAddress.toString('regtest'));
       // XEC for A's token payment's dust and fee.
       await rpc('generatetoaddress', 1, a.address);
       await rpc('generatetoaddress', 100,
@@ -178,7 +180,7 @@ describe('Web wallet tokens', function() {
       const tokens = new Tokens({coins, node: spv});
       await spv.connect();
       spv.startSync();
-      await until(() => spv.chain.height === 106, 'sync');
+      await until(() => spv.chain.height === 109, 'sync');
 
       const toA = vault.ring('a').getAddress();
       const coinsOf = address => coins.unspent(address).filter(c => c.token);
@@ -209,6 +211,25 @@ describe('Web wallet tokens', function() {
       assert.strictEqual(token.ticker, 'TCENT');
       assert.strictEqual(token.decimals, 2);
       assert.strictEqual(token.version, 1);
+
+      // The genesis kept whole, and every field of its OP_RETURN in the
+      // token's record, with its block.
+      assert.strictEqual(tokens.state.slpTXs[g1.txid()].raw,
+        g1.toRaw().toString('hex'));
+      assert.strictEqual(token.name, 'Test Cents');
+      assert.strictEqual(token.uri, '');
+      assert.strictEqual(token.documentHash, '');
+      assert.strictEqual(token.quantity, '100000');
+      assert.strictEqual(token.batonVout, null);
+      assert.strictEqual(token.block, Buffer.from(
+        await full.chain.getHash(g1Height)).reverse().toString('hex'));
+
+      // As recorded before every field was: described again from the
+      // genesis kept.
+      tokens.state.tokens[g1.txid()] = {tokenId: g1.txid(), height: g1Height,
+        ticker: 'TCENT', decimals: 2, version: 1};
+      await tokens.checkAll();
+      assert.deepStrictEqual(tokens.get(g1.txid()), token);
       await tokens.checkAll();
       assert.strictEqual(coin.slp.amount, '5');
       assert.strictEqual(tokens.status(coin), 'valid');
@@ -218,16 +239,18 @@ describe('Web wallet tokens', function() {
       const bogus = await spend([await coinbase(2)],
         [[slp(byte(1), text('SEND'), id(g1.txid()), u64(100000)), 0],
           [toA, 546]]);
-      // Invalid at once, unconfirmed: its parent is in no block since the
-      // genesis, nor a mempool. Nodes do not judge SLP: mined all the same.
+      // Its only parent is in no block since the genesis, nor a mempool:
+      // older than the token, or withheld. Unproven, locked, not kept as a
+      // verdict. Nodes do not judge SLP: mined all the same.
       await until(() => coinsOf(a.address).length === 2, 'bogus coin');
       const bogusCoin = coinsOf(a.address).find(c => c.txid === bogus.txid());
       assert.strictEqual(bogusCoin.height, -1);
       await tokens.checkAll();
-      assert.strictEqual(tokens.status(bogusCoin), 'invalid');
+      assert.strictEqual(tokens.status(bogusCoin), 'unproven');
       await mine();
       await until(() => bogusCoin.height !== -1, 'bogus mined');
-      assert.strictEqual(tokens.status(bogusCoin), 'invalid');
+      assert.strictEqual(tokens.status(bogusCoin), 'unproven');
+      assert.strictEqual(tokens.state.slpValid[bogus.txid()], undefined);
 
       // An unconfirmed chain: valid, its parent from the node's mempool.
       const s3 = await spend([Coin.fromTX(s1, 2, g1Height),
@@ -243,10 +266,24 @@ describe('Web wallet tokens', function() {
       await tokens.checkAll();
       assert.strictEqual(tokens.status(chained), 'valid');
 
+      // Short with every parent found: invalid. The issuer's 999.85 and
+      // the chain's XEC change cannot make 2,000.00.
+      const short = await spend([Coin.fromTX(s3, 2, -1),
+        Coin.fromTX(s4, 2, -1)],
+      [[slp(byte(1), text('SEND'), id(g1.txid()), u64(200000)), 0],
+        [toA, 546]]);
+      await until(() => coinsOf(a.address).some(c => c.txid === short.txid()),
+        'short coin');
+      await tokens.checkAll();
+      const shortCoin = coinsOf(a.address).find(c => c.txid === short.txid());
+      assert.strictEqual(tokens.status(shortCoin), 'invalid');
+
       const balance = address => tokens.balances(address)
-        .find(e => e.tokenId === g1.txid()) || {valid: 0n, invalid: 0n};
+        .find(e => e.tokenId === g1.txid())
+        || {valid: 0n, invalid: 0n, unproven: 0n};
       assert.strictEqual(balance(a.address).valid, 15n);
-      assert.strictEqual(balance(a.address).invalid, 100000n);
+      assert.strictEqual(balance(a.address).unproven, 100000n);
+      assert.strictEqual(balance(a.address).invalid, 200000n);
 
       // A pays B 0.07 at zero conf, on that unconfirmed chain: only valid
       // coins of the token, change back.
@@ -286,7 +323,12 @@ describe('Web wallet tokens', function() {
       assert.strictEqual(balance(a.address).valid, 8n);
 
       // Type 2: a genesis naming its vault, minting nothing; a MINT that
-      // draws on the vault is valid, one that does not is not.
+      // draws on the vault is valid, one that does not is not. The vault
+      // may be funded before the genesis: a MINT drawing on that is valid
+      // too, decided by its redeem script, not by finding the coin.
+      const early = await spend([await coinbase(7)],
+        [[Script.fromScripthash(VAULT_HASH), 10000]]);
+      await mine();
       const g2 = await spend([await coinbase(3)], [
         [slp(byte(2), text('GENESIS'), text('VLT'), text('Vault'), text(''),
           text(''), byte(0), VAULT_HASH, u64(0)), 0],
@@ -300,6 +342,12 @@ describe('Web wallet tokens', function() {
       [[slp(byte(2), text('MINT'), id(g2.txid()), u64(50)), 0], [toA, 546]],
       {extra: (mtx) => {
         // The vault input: its redeem script, OP_1.
+        mtx.inputs[0].script = Script.fromRaw(Buffer.from([0x01, 0x51]));
+      }});
+      const fromEarly = await spend([Coin.fromTX(early, 0, -1),
+        Coin.fromTX(early, 1, -1)],
+      [[slp(byte(2), text('MINT'), id(g2.txid()), u64(7)), 0], [toA, 546]],
+      {extra: (mtx) => {
         mtx.inputs[0].script = Script.fromRaw(Buffer.from([0x01, 0x51]));
       }});
       const noVault = await spend([await coinbase(5)],
@@ -323,6 +371,59 @@ describe('Web wallet tokens', function() {
         .find(c => c.txid === txid));
       assert.strictEqual(status(mint.txid()), 'valid');
       assert.strictEqual(status(noVault.txid()), 'invalid');
+      assert.strictEqual(status(fromEarly.txid()), 'valid');
+
+      // Type 2 with tokens at genesis: a coin descended from its initial
+      // output is valid by the genesis alone, no vault MINT on the way.
+      const g4 = await spend([await coinbase(8)], [
+        [slp(byte(2), text('GENESIS'), text('GEN2'), text('Genesis made'),
+          text(''), text(''), byte(0), VAULT_HASH, u64(100)), 0],
+        [issuerAddress, 546]]);
+      const fromGenesis = await spend([Coin.fromTX(g4, 1, -1),
+        Coin.fromTX(g4, 2, -1)],
+      [[slp(byte(2), text('SEND'), id(g4.txid()), u64(40), u64(60)), 0],
+        [toA, 546], [issuerAddress, 546]]);
+      await mine();
+      const g4Height = full.chain.height;
+      await until(() => coinsOf(a.address).some(c => c.txid
+        === fromGenesis.txid() && c.height !== -1), 'from genesis');
+      await tokens.add(g4.txid(), g4Height);
+      await tokens.checkAll();
+      assert.strictEqual(status(fromGenesis.txid()), 'valid');
+      assert.strictEqual(tokens.balances(a.address)
+        .find(e => e.tokenId === g4.txid()).valid, 40n);
+
+      // Type 1 with a mint baton: MINT on MINT, the baton passed on, each
+      // valid only down its baton's chain to the genesis.
+      const g3 = await spend([await coinbase(6)], [
+        [slp(byte(1), text('GENESIS'), text('BTN'), text('Baton'), text(''),
+          text(''), byte(0), byte(2), u64(1)), 0],
+        [issuerAddress, 546], [issuerAddress, 546]]);
+      const mint1 = await spend([Coin.fromTX(g3, 2, -1),
+        Coin.fromTX(g3, 3, -1)],
+      [[slp(byte(1), text('MINT'), id(g3.txid()), byte(2), u64(10)), 0],
+        [issuerAddress, 546], [issuerAddress, 546]]);
+      const mint2 = await spend([Coin.fromTX(mint1, 2, -1),
+        Coin.fromTX(mint1, 3, -1)],
+      [[slp(byte(1), text('MINT'), id(g3.txid()), byte(2), u64(20)), 0],
+        [toA, 546], [issuerAddress, 546]]);
+      // Not the baton: the genesis's minted output.
+      const fake = await spend([Coin.fromTX(g3, 1, -1),
+        Coin.fromTX(mint2, 3, -1)],
+      [[slp(byte(1), text('MINT'), id(g3.txid()), text(''), u64(30)), 0],
+        [toA, 546]]);
+      await mine();
+      const g3Height = full.chain.height;
+      await until(() => coinsOf(a.address).some(c => c.txid === fake.txid())
+        && coinsOf(a.address).every(c => c.height !== -1), 'baton mints');
+
+      const btn = await tokens.add(g3.txid(), g3Height);
+      assert.strictEqual(btn.baton, true);
+      assert.strictEqual(btn.batonVout, 2);
+      await tokens.checkAll();
+      assert.strictEqual(status(mint2.txid()), 'valid');
+      assert.strictEqual(status(fake.txid()), 'invalid');
+      assert.strictEqual(tokens.state.slpValid[mint1.txid()], true);
     } finally {
       if (spv)
         await spv.close();

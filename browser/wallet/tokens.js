@@ -13,8 +13,12 @@
  * (SLP.getTxRecords), and judged by the indexer's rules:
  *
  *   GENESIS  valid: here, the token's own (its txid is the token id).
- *   MINT     valid if it spends a mint baton of the token; for Type 2, or
- *            an output paying the vault script hash its genesis names.
+ *   MINT     Type 1: valid if it spends a mint baton of the token, so
+ *            down the baton's chain, MINT by MINT, to the genesis.
+ *            Type 2: no baton; valid if it draws on the vault: an input
+ *            whose redeem script hashes to the vault script hash its
+ *            genesis names (consensus spends a P2SH output only so). A
+ *            walk stops at such a MINT, with no parents to fetch.
  *   SEND     valid if its inputs of the token (same id and type) hold at
  *            least what it sends.
  *
@@ -35,9 +39,15 @@
  * not in a block are asked of peers' mempools: token transactions are
  * valid unconfirmed, chained on unconfirmed parents, so a token coin can
  * be spent with no confirmation, as XEC can. Only a token's GENESIS must
- * be in a block, to be added. A parent found in neither is older than the
- * token, and holds none of it. With no peer to ask, a transaction short
- * for want of a parent is pending, not invalid, and checked again.
+ * be in a block, to be added.
+ *
+ * A coin is locked, neither counted nor spent, as XEC or as tokens, until
+ * this walk calls it valid. What a peer cannot do is fake a parent (it is
+ * named by its txid, and a block's by its merkle proof); what it can do
+ * is withhold one. So a transaction short only for want of a parent not
+ * found is unproven, not invalid: locked, and checked again in a later
+ * session. Verdicts on confirmed transactions are kept; those on an
+ * unconfirmed chain hold only while the page runs, and are checked again.
  */
 
 const assert = require('bsert');
@@ -46,6 +56,7 @@ const {BloomFilter} = require('bfilter');
 const TX = require('../../lib/primitives/tx');
 const SLP = require('../../lib/script/slp');
 const {types: packetTypes} = require('../../lib/net/packets');
+const hash160 = require('bcrypto/lib/hash160');
 
 // Blocks per scan when walking down for parents.
 const WINDOW = 2000;
@@ -99,10 +110,38 @@ function read(tx) {
       ticker: token.ticker,
       name: token.name,
       uri: token.uri,
+      documentHash: token.hash || '',
       decimals: token.decimals,
       vault: token.vaultScriptHash
         ? Buffer.from(token.vaultScriptHash).toString('hex') : null
     } : null
+  };
+}
+
+/**
+ * A token, as its genesis defines it: every field of its OP_RETURN, and
+ * where it was mined. The genesis itself, whole, is kept with the other
+ * transactions fetched (state.slpTXs, by the token id).
+ * @param {TX} tx - the genesis.
+ * @param {Number} height
+ * @param {String|null} block - its block's hash, as displayed.
+ * @returns {Object}
+ */
+
+function describe(tx, height, block) {
+  const record = read(tx);
+  assert(record && record.type === 'GENESIS', 'Not an SLP token genesis.');
+
+  return {
+    tokenId: record.tokenId,
+    height,
+    block,
+    version: record.version,
+    ...record.genesis,
+    // Type 1: the output carrying the mint baton, if any.
+    batonVout: record.baton,
+    baton: record.baton != null,
+    quantity: (record.amounts[1] || 0n).toString()
   };
 }
 
@@ -138,6 +177,20 @@ function holding(record, vout) {
 
 const sum = values => values.reduce((a, b) => a + b, 0n);
 
+/**
+ * Whether a Type 2 MINT draws on its token's vault: an input whose redeem
+ * script (the last push of a P2SH spend) hashes to the vault script hash.
+ */
+
+function drawsOnVault(tx, vault) {
+  for (const input of tx.inputs) {
+    const redeem = input.script.getRedeem();
+    if (redeem && hash160.digest(redeem.toRaw()).toString('hex') === vault)
+      return true;
+  }
+  return false;
+}
+
 class Tokens extends EventEmitter {
   /**
    * @param {Object} options
@@ -155,6 +208,9 @@ class Tokens extends EventEmitter {
     this.checking = null;
     // Tokens asked of the hint this session, and what came of it.
     this.lookups = new Map();
+    // Verdicts that are not final (on an unconfirmed chain, or unproven):
+    // this session's.
+    this.verdicts = new Map();
   }
 
   get state() {
@@ -204,14 +260,7 @@ class Tokens extends EventEmitter {
     assert(record && record.type === 'GENESIS' && record.tokenId === tokenId,
       'That transaction is not an SLP token genesis.');
 
-    const token = {
-      tokenId,
-      height,
-      version: record.version,
-      ...record.genesis,
-      supply: (record.amounts[1] || 0n).toString(),
-      baton: record.baton != null
-    };
+    const token = describe(got.tx, height, got.block);
 
     this.state.tokens[tokenId] = token;
     this.coins.save();
@@ -249,6 +298,7 @@ class Tokens extends EventEmitter {
           token: info && info.tokenId ? this.get(info.tokenId) : null,
           valid: 0n,
           pending: 0n,
+          unproven: 0n,
           invalid: 0n,
           coins: 0
         });
@@ -296,14 +346,7 @@ class Tokens extends EventEmitter {
     for (const [txid, tokens] of byTX) {
       result.set(txid, [...tokens.values()].map((entry) => {
         const token = this.get(entry.tokenId);
-        const valid = this.state.slpValid[txid];
-        let status = 'pending';
-        if (!token)
-          status = 'unknown';
-        else if (valid === true)
-          status = 'valid';
-        else if (valid === false)
-          status = 'invalid';
+        const status = token ? this.verdictOf(txid) : 'unknown';
         return {...entry, token, status};
       }));
     }
@@ -312,8 +355,23 @@ class Tokens extends EventEmitter {
   }
 
   /**
-   * A token coin's standing: valid, pending, invalid, or unknown (its
-   * token not added).
+   * A transaction's verdict: final if kept, else this session's, else
+   * pending.
+   * @returns {String} valid | invalid | unproven | pending
+   */
+
+  verdictOf(txid) {
+    const final = this.state.slpValid[txid];
+    if (final === true)
+      return 'valid';
+    if (final === false)
+      return 'invalid';
+    return this.verdicts.get(txid) || 'pending';
+  }
+
+  /**
+   * A token coin's standing: valid, pending, unproven, invalid, or unknown
+   * (its token not added). Only a valid one is counted, or spent.
    */
 
   status(coin) {
@@ -322,12 +380,7 @@ class Tokens extends EventEmitter {
       return 'invalid';
     if (!this.get(info.tokenId))
       return 'unknown';
-    const valid = this.state.slpValid[coin.txid];
-    if (valid === true)
-      return 'valid';
-    if (valid === false)
-      return 'invalid';
-    return 'pending';
+    return this.verdictOf(coin.txid);
   }
 
   /**
@@ -366,6 +419,7 @@ class Tokens extends EventEmitter {
   }
 
   async checkPending() {
+    await this.redescribe();
     await this.backfill();
     await this.discover();
 
@@ -373,13 +427,47 @@ class Tokens extends EventEmitter {
     for (const coin of Object.values(this.coins.state.coins)) {
       if (coin.token && !coin.spent && coin.slp && coin.slp.tokenId
           && this.get(coin.slp.tokenId)
-          && this.state.slpValid[coin.txid] == null) {
+          && this.state.slpValid[coin.txid] == null
+          && this.verdicts.get(coin.txid) !== 'unproven') {
         txids.add(coin.txid);
       }
     }
 
     for (const txid of txids)
       await this.check(txid);
+  }
+
+  /**
+   * Tokens added before their record held every field of the genesis:
+   * described again from the genesis kept whole.
+   */
+
+  async redescribe() {
+    let changed = false;
+
+    for (const [tokenId, token] of Object.entries(this.state.tokens)) {
+      if (token.documentHash !== undefined)
+        continue;
+      const kept = this.state.slpTXs[tokenId];
+      if (!kept)
+        continue;
+
+      // Its block's hash, from the chain this page holds.
+      let block = kept.block || null;
+      if (!block) {
+        const hash = await this.node.chain.getHash(token.height);
+        block = hash ? Buffer.from(hash).reverse().toString('hex') : null;
+      }
+
+      const tx = TX.fromRaw(Buffer.from(kept.raw, 'hex'));
+      this.state.tokens[tokenId] = describe(tx, token.height, block);
+      changed = true;
+    }
+
+    if (changed) {
+      this.coins.save();
+      this.emit('change');
+    }
   }
 
   /**
@@ -528,6 +616,10 @@ class Tokens extends EventEmitter {
             || rec.version !== token.version)
           return;
 
+        // A Type 2 MINT is decided by its own inputs' redeem scripts.
+        if (rec.type === 'MINT' && token.vault)
+          return;
+
         for (const input of held.tx.inputs) {
           const parent = input.prevout.txid();
           if (!this.txOf(parent) && !missing.has(parent)) {
@@ -568,10 +660,14 @@ class Tokens extends EventEmitter {
       assert(round < 100000, 'Token walk did not end.');
     }
 
-    const result = this.evaluate(txid, token, new Map(), unreachable);
+    const result = this.evaluate(txid, token, new Map(), {missing,
+      unreachable});
 
-    if (result !== 'pending')
+    // Kept only if final: confirmed, and not resting on what was not found.
+    if (root.height !== -1 && (result === 'valid' || result === 'invalid'))
       this.decide(txid, result === 'valid');
+    else
+      this.verdicts.set(txid, result);
 
     this.emit('change');
     return result;
@@ -579,10 +675,11 @@ class Tokens extends EventEmitter {
 
   /**
    * Decide a transaction of the token, from what is held: 'valid',
-   * 'invalid', or 'pending' (a parent not found could change it).
+   * 'invalid', 'unproven' (short only for a parent not found), or 'pending'
+   * (short for a parent no peer could be asked for).
    */
 
-  evaluate(txid, token, memo, unreachable) {
+  evaluate(txid, token, memo, {missing, unreachable}) {
     if (memo.has(txid))
       return memo.get(txid);
 
@@ -594,8 +691,11 @@ class Tokens extends EventEmitter {
       return 'valid';
 
     const held = this.txOf(txid);
-    if (!held)
-      return unreachable.has(txid) ? 'pending' : 'invalid';
+    if (!held) {
+      if (unreachable.has(txid))
+        return 'pending';
+      return missing.has(txid) ? 'unproven' : 'invalid';
+    }
 
     // Guard cycles (none exist on a chain, but held data could lie).
     memo.set(txid, 'invalid');
@@ -604,11 +704,17 @@ class Tokens extends EventEmitter {
     let result = 'invalid';
 
     if (record && record.tokenId === token.tokenId
+        && record.version === token.version && record.type === 'MINT'
+        && token.vault) {
+      result = drawsOnVault(held.tx, token.vault) ? 'valid' : 'invalid';
+    } else if (record && record.tokenId === token.tokenId
         && record.version === token.version) {
       let have = 0n;
       let unsure = 0n;
+      let unproven = 0n;
       let baton = false;
       let batonUnsure = false;
+      let batonUnproven = false;
 
       for (const input of held.tx.inputs) {
         const {index} = input.prevout;
@@ -617,22 +723,16 @@ class Tokens extends EventEmitter {
 
         if (!parentHeld) {
           // In no block down to the genesis, nor a mempool: older than
-          // the token, holding none of it. Unless no peer could be asked.
+          // the token, holding none of it; or withheld. Unless no peer
+          // could be asked at all.
           if (unreachable.has(parent)) {
             unsure += 1n;
             batonUnsure = true;
+          } else if (missing.has(parent)) {
+            unproven += 1n;
+            batonUnproven = true;
           }
           continue;
-        }
-
-        // Type 2: a MINT may draw on its vault, an output paying the
-        // script hash its genesis names.
-        if (record.type === 'MINT' && token.vault) {
-          const output = parentHeld.tx.outputs[index];
-          if (output && output.getType() === 'scripthash'
-              && output.getHash('hex') === token.vault) {
-            baton = true;
-          }
         }
 
         const rec = read(parentHeld.tx);
@@ -640,7 +740,8 @@ class Tokens extends EventEmitter {
             || rec.version !== token.version)
           continue;
 
-        const standing = this.evaluate(parent, token, memo, unreachable);
+        const standing = this.evaluate(parent, token, memo, {missing,
+          unreachable});
         if (standing === 'invalid')
           continue;
 
@@ -648,6 +749,13 @@ class Tokens extends EventEmitter {
           unsure += 1n;
           if (rec.baton === index)
             batonUnsure = true;
+          continue;
+        }
+
+        if (standing === 'unproven') {
+          unproven += 1n;
+          if (rec.baton === index)
+            batonUnproven = true;
           continue;
         }
 
@@ -664,20 +772,28 @@ class Tokens extends EventEmitter {
           result = 'valid';
         else if (batonUnsure)
           result = 'pending';
+        else if (batonUnproven)
+          result = 'unproven';
       } else if (record.type === 'SEND') {
         const out = sum(Object.values(record.amounts));
         if (have >= out)
           result = 'valid';
         else if (unsure > 0n)
           result = 'pending';
+        else if (unproven > 0n)
+          result = 'unproven';
       }
     }
 
     memo.set(txid, result);
 
-    // Remember what is settled, and in a block: it cannot change.
-    if (result !== 'pending' && held.height !== -1)
+    // Kept if settled, in a block, and not resting on what was not found:
+    // it cannot change. A valid one rests only on found parents, all
+    // in blocks below it.
+    if ((result === 'valid' || result === 'invalid') && held.height !== -1)
       this.state.slpValid[txid] = result === 'valid';
+    else
+      this.verdicts.set(txid, result);
 
     return result;
   }
@@ -816,10 +932,12 @@ class Tokens extends EventEmitter {
             if (!wanted.has(txid))
               continue;
             wanted.delete(txid);
-            found.set(txid, {tx, height: entry.height});
+            const block = entry.rhash();
+            found.set(txid, {tx, height: entry.height, block});
             this.state.slpTXs[txid] = {
               raw: tx.toRaw().toString('hex'),
-              height: entry.height
+              height: entry.height,
+              block
             };
           }
         });
@@ -834,3 +952,4 @@ class Tokens extends EventEmitter {
 exports.Tokens = Tokens;
 exports.read = read;
 exports.holding = holding;
+exports.describe = describe;
