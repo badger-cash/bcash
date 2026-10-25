@@ -101,6 +101,8 @@ Note that certain chain options affect the format and indexing of the chain data
   Needs the optional dependency `@fails-components/webtransport`.
 - `wt-host`: Host to listen on for WebTransport, also named in the
   certificate (default: `public-host`, else 0.0.0.0).
+- `wt-max-inbound`: Max number of inbound peers over WebTransport, pages,
+  apart from `max-inbound` for those over TCP (default: 64).
 - `wt-seed-port`: UDP port to serve WebTransport as a seed, with a
   certificate for the node's domain (default: off). A page dials a seed by
   its domain name, as a DNS seed, to learn the nodes it knows.

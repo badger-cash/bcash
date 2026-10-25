@@ -106,13 +106,15 @@ describe('wtaddr', function() {
       const base = 20000 + crypto.randomInt(0, 10000);
 
       // A listens on TCP and WebTransport; B dials A over TCP and
-      // announces its own WebTransport endpoint to it.
+      // announces its own WebTransport endpoint to it. A's one TCP slot is
+      // B's: pages over WebTransport have slots of their own.
       const a = new FullNode({
         network: 'regtest',
         memory: true,
         workers: false,
         bip37: true,
         listen: true,
+        maxInbound: 1,
         host: '127.0.0.1',
         port: base,
         httpPort: base + 1,
@@ -208,6 +210,8 @@ describe('wtaddr', function() {
         for (let peer = spv.pool.peers.head(); peer; peer = peer.next)
           assert.strictEqual(peer.socket.constructor.name,
             'WebTransportSocket');
+        assert.deepStrictEqual(a.pool.inboundCounts(),
+          {tcp: 1, webTransport: 1});
       } finally {
         if (spv)
           await spv.close();
