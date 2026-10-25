@@ -165,9 +165,10 @@ No special server is required:
 - With no compression at all, the wallet is 1.5 MB. It loads more slowly
   but works the same.
 
-The page opens on mainnet. The network menu beside the name switches to
-testnet and back without reloading the page, and `?network=testnet` in the
-URL opens it on testnet.
+The page opens on mainnet the first time, and after that on whichever
+network you last used in that browser. The network menu beside the name
+switches between mainnet and testnet without reloading the page, and
+`?network=testnet` (or `?network=main`) in the URL opens it on that network.
 
 ### What the wallet does
 

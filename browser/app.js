@@ -207,8 +207,34 @@ const ui = {
   nodeError: null
 };
 
+// The network: the address's `?network=`, else the one last used in this
+// browser, else mainnet.
+const LAST_NETWORK = 'bcash-wallet-network';
+
+function lastNetwork() {
+  try {
+    return localStorage.getItem(LAST_NETWORK);
+  } catch (e) {
+    return null;
+  }
+}
+
+function rememberNetwork(id) {
+  try {
+    localStorage.setItem(LAST_NETWORK, id);
+  } catch (e) {
+    ;
+  }
+}
+
+const known = id => NETWORKS.some(n => n.id === id);
 const asked = new URLSearchParams(location.search).get('network');
-let network = NETWORKS.some(n => n.id === asked) ? asked : 'main';
+let network = 'main';
+if (known(asked))
+  network = asked;
+else if (known(lastNetwork()))
+  network = lastNetwork();
+rememberNetwork(network);
 let anchor = bcash.newestCheckpoint(network);
 let node = null;
 let coins = null;
@@ -425,6 +451,7 @@ async function switchNetwork(id) {
     await stopNode();
 
     network = id;
+    rememberNetwork(network);
     anchor = bcash.newestCheckpoint(network);
     ticker = net().ticker;
 
