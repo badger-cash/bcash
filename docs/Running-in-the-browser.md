@@ -54,10 +54,14 @@ This builds `browser/bcash-wallet.js`, the web wallet that
 recovery phrases, and uses the browser's own Unicode normalization),
 `browser/bcash-scan.js`, its QR code reader, loaded the first time a code
 is scanned, and `browser/bcash-spv.js`, the SPV node alone, a script
-exposing `bcash`, for pages of your own (every BIP39 language). Serve
+exposing `bcash`, for pages of your own (every BIP39 language). Each is
+also written compressed beside it, `.br` (Brotli) and `.gz`. Serve
 `index.html`, `bcash-wallet.js` and `bcash-scan.js` from any static web
-server, compressed, over HTTPS (browsers offer WebTransport only to secure
-pages). The network menu beside the name
+server over HTTPS (browsers offer WebTransport only to secure pages): one
+that sends stored compressed files (nginx's `brotli_static` and
+`gzip_static`, Caddy's `precompressed`) sends about 310 KB for the wallet;
+most hosts and CDNs compress on their own; with none, it is the plain
+1.5 MB, slower to load, the same wallet. The network menu beside the name
 switches between mainnet and testnet in place; `?network=` picks the first
 (testnet by default).
 

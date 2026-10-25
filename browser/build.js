@@ -14,13 +14,20 @@
  * wordlist alone (browser/wordlist-english.js), and the browser's own
  * Unicode normalization.
  *
+ * Each bundle is also written compressed beside it, Brotli (.br, at its
+ * best) and gzip (.gz), for a server that sends files as they are stored
+ * (nginx's brotli_static and gzip_static, Caddy's precompressed); any
+ * other compresses them itself, or sends them plain.
+ *
  * bcash's and its dependencies' browser fields pick the browser modules
  * (IndexedDB storage, JavaScript crypto, stubs for TCP, DNS and files);
  * the Node.js built-ins left get a polyfill, a stub (os), or an empty
  * module where the SPV node never calls them.
  */
 
+const fs = require('fs');
 const path = require('path');
+const zlib = require('zlib');
 const esbuild = require('esbuild');
 
 const root = path.resolve(__dirname, '..');
@@ -74,7 +81,38 @@ async function bundle(entry, outfile, globalName, plugins = []) {
   return {outfile, bytes: out ? out.bytes : null};
 }
 
+/**
+ * Write a file's Brotli and gzip forms beside it.
+ */
+
+function precompress(file) {
+  const data = fs.readFileSync(file);
+
+  fs.writeFileSync(`${file}.br`, zlib.brotliCompressSync(data, {
+    params: {
+      [zlib.constants.BROTLI_PARAM_MODE]: zlib.constants.BROTLI_MODE_TEXT,
+      [zlib.constants.BROTLI_PARAM_QUALITY]:
+        zlib.constants.BROTLI_MAX_QUALITY,
+      [zlib.constants.BROTLI_PARAM_SIZE_HINT]: data.length
+    }
+  }));
+
+  fs.writeFileSync(`${file}.gz`, zlib.gzipSync(data, {
+    level: zlib.constants.Z_BEST_COMPRESSION
+  }));
+}
+
 async function build() {
+  const results = await bundles();
+
+  for (const {outfile} of results)
+    precompress(outfile);
+  precompress(path.join(__dirname, 'index.html'));
+
+  return results;
+}
+
+async function bundles() {
   return [
     await bundle('spv.js', path.join(__dirname, 'bcash-spv.js'), 'bcash'),
     await bundle('app.js', path.join(__dirname, 'bcash-wallet.js'),

@@ -5,5 +5,7 @@ browser/bcoin*
 browser/bcash-spv.js
 browser/bcash-wallet.js
 browser/bcash-scan.js
+browser/*.br
+browser/*.gz
 npm-debug.log
 coverage/
