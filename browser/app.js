@@ -205,7 +205,7 @@ let ticker = net().ticker;
 
 const explorer = txid => network === 'main'
   ? `https://explorer.e.cash/tx/${txid}`
-  : `https://texplorer.bitcoinabc.org/tx/${txid}`;
+  : `https://texplorer.e.cash/tx/${txid}`;
 
 /*
  * Events: a log for the Node tab, the whole session's, every network's.
