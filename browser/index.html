@@ -165,6 +165,14 @@
         margin-top: 0;
         margin-right: 0;
       }
+      /* Beside another button, the main one takes the room left. */
+      .row > button.primary {
+        flex: 1;
+        width: auto;
+      }
+      dl + .row, dl + .error {
+        margin-top: 16px;
+      }
       .icon-button {
         width: 46px;
         height: 46px;
