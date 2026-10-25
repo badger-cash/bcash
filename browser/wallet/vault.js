@@ -9,13 +9,16 @@
 /*
  * The keys, each with a name, one of them in use, kept encrypted with a
  * password: PBKDF2 (SHA-256) derives an AES-GCM key, which also seals the
- * wallet's other state (its coins and history), so nothing about the keys
- * is readable without the password.
+ * wallet's other state (each network's coins and history), so nothing
+ * about the keys is readable without the password.
  *
- * A key is a WIF, or a mnemonic (BIP39) and the one address it derives at
- * Cashtab's path, m/44'/1899'/0'/0/0, so a Cashtab phrase opens the same
- * address. Each key keeps the height it was born at (made here, or as the
- * person importing it says): a scan for what it holds starts there.
+ * A key is a private key, or a mnemonic (BIP39) and the one address it
+ * derives at Cashtab's path, m/44'/1899'/0'/0/0, so a Cashtab phrase opens
+ * the same address. Keys belong to no network: the same key is an
+ * ecash: address on mainnet and an ectest: one on testnet. Each keeps when
+ * it was made, and the height it was born at on each network where that
+ * is known (made there, or as the person importing it said): a scan for
+ * what it holds starts there.
  *
  * The wallet file is the vault as stored, sealed with its password, keys,
  * phrases and birth heights in it: imported elsewhere, it needs that
@@ -30,11 +33,13 @@ const KeyRing = require('../../lib/primitives/keyring');
 const HDPrivateKey = require('../../lib/hd/private');
 const Mnemonic = require('../../lib/hd/mnemonic');
 
-const VERSION = 1;
+const VERSION = 2;
 const FORMAT = 'bcash-wallet';
 const ITERATIONS = 600000;
 const PATH = 'm/44\'/1899\'/0\'/0/0';
 const NAME = /^[A-Za-z0-9 _.-]{1,32}$/;
+const STORE = 'bcash-wallet';
+const NETWORKS = ['main', 'testnet', 'regtest', 'simnet'];
 
 const subtle = () => globalThis.crypto.subtle;
 const b64 = buf => Buffer.from(buf).toString('base64');
@@ -79,22 +84,50 @@ class Sealer {
 }
 
 /**
+ * A key as kept before keys left their network (version 1: a WIF and a
+ * birth height on the one network of its wallet).
+ */
+
+function fromV1(key, network) {
+  const ring = KeyRing.fromSecret(key.wif, network);
+  return {
+    name: key.name,
+    type: key.type,
+    key: ring.getPrivateKey('hex'),
+    phrase: key.phrase || null,
+    path: key.path || null,
+    created: null,
+    born: key.born != null ? {[network]: key.born} : {}
+  };
+}
+
+/**
  * Open a stored or exported vault with its password.
  * @returns {Promise} {sealer, state}
  */
 
 async function openVault(stored, password) {
-  assert(stored && stored.version === VERSION && stored.keys,
-    'Not a bcash wallet.');
+  assert(stored && stored.keys && (stored.version === 1
+    || stored.version === VERSION), 'Not a bcash wallet.');
 
   const sealer = new Sealer(await deriveKey(password, unb64(stored.salt),
     stored.iterations));
 
+  let state;
   try {
-    return {sealer, state: await sealer.open(stored.keys)};
+    state = await sealer.open(stored.keys);
   } catch (e) {
     throw new Error('Wrong password.');
   }
+
+  if (stored.version === 1) {
+    state = {
+      active: state.active,
+      keys: state.keys.map(key => fromV1(key, stored.network))
+    };
+  }
+
+  return {sealer, state};
 }
 
 /**
@@ -116,26 +149,56 @@ function phraseRing(phrase, path = PATH) {
   return KeyRing.fromPrivate(key.privateKey, true);
 }
 
+/**
+ * A WIF, for any network.
+ */
+
+function wifRing(text) {
+  for (const network of NETWORKS) {
+    try {
+      return KeyRing.fromSecret(text, network);
+    } catch (e) {
+      continue;
+    }
+  }
+  throw new Error('Not a recovery phrase, or a private key (WIF).');
+}
+
 class Vault {
   /**
    * @param {Object} options
-   * @param {String} options.network
    * @param {Object} options.storage - localStorage-like.
    * @param {Number} [options.iterations]
    */
 
-  constructor({network, storage, iterations = ITERATIONS}) {
-    this.network = network;
+  constructor({storage, iterations = ITERATIONS}) {
     this.storage = storage;
     this.iterations = iterations;
-    this.name = `bcash-wallet-${network}`;
     this.sealer = null;
     this.state = null;
     this.header = null;
   }
 
+  /**
+   * The stored vault: this version's, or one kept per network before.
+   */
+
+  stored() {
+    const value = this.storage.getItem(STORE);
+    if (value)
+      return {stored: JSON.parse(value), legacy: null};
+
+    for (const network of NETWORKS) {
+      const old = this.storage.getItem(`${STORE}-${network}`);
+      if (old)
+        return {stored: JSON.parse(old), legacy: network};
+    }
+
+    return {stored: null, legacy: null};
+  }
+
   exists() {
-    return this.storage.getItem(this.name) != null;
+    return this.stored().stored != null;
   }
 
   get unlocked() {
@@ -154,7 +217,6 @@ class Vault {
     this.header = {
       format: FORMAT,
       version: VERSION,
-      network: this.network,
       salt: b64(salt),
       iterations: this.iterations
     };
@@ -163,18 +225,30 @@ class Vault {
   }
 
   async unlock(password) {
-    const stored = JSON.parse(this.storage.getItem(this.name));
+    const {stored, legacy} = this.stored();
+    assert(stored, 'No wallet to unlock.');
+
     const {sealer, state} = await openVault(stored, password);
 
     this.sealer = sealer;
     this.state = state;
     this.header = {
       format: FORMAT,
-      version: stored.version,
-      network: this.network,
+      version: VERSION,
       salt: stored.salt,
       iterations: stored.iterations
     };
+
+    // Kept per network before: moved to this version, its coins with it,
+    // sealed as they were (the same salt keeps the same key).
+    if (legacy) {
+      await this.save();
+      const old = this.storage.getItem(`${STORE}-${legacy}-state`);
+      if (old)
+        this.storage.setItem(`${STORE}-state-${legacy}`, old);
+      this.storage.removeItem(`${STORE}-${legacy}`);
+      this.storage.removeItem(`${STORE}-${legacy}-state`);
+    }
   }
 
   lock() {
@@ -183,91 +257,106 @@ class Vault {
   }
 
   /**
-   * Forget the wallet: its keys, and the state sealed with them.
+   * Forget the wallet: its keys, and every network's state.
    */
 
   destroy() {
     this.lock();
-    this.storage.removeItem(this.name);
-    this.storage.removeItem(`${this.name}-state`);
+    this.storage.removeItem(STORE);
+    for (const network of NETWORKS) {
+      this.storage.removeItem(`${STORE}-state-${network}`);
+      this.storage.removeItem(`${STORE}-${network}`);
+      this.storage.removeItem(`${STORE}-${network}-state`);
+    }
   }
 
   async save() {
     assert(this.unlocked, 'The wallet is locked.');
     const stored = {...this.header, keys: await this.sealer.seal(this.state)};
-    this.storage.setItem(this.name, JSON.stringify(stored));
+    this.storage.setItem(STORE, JSON.stringify(stored));
   }
 
   /**
-   * The wallet's other state (coins, history), sealed with the same key.
+   * A network's other state (coins, history), sealed with the same key.
    */
 
-  async saveState(value) {
+  async saveState(network, value) {
     assert(this.unlocked, 'The wallet is locked.');
-    this.storage.setItem(`${this.name}-state`,
+    this.storage.setItem(`${STORE}-state-${network}`,
       JSON.stringify(await this.sealer.seal(value)));
   }
 
-  async loadState() {
+  async loadState(network) {
     assert(this.unlocked, 'The wallet is locked.');
-    const stored = this.storage.getItem(`${this.name}-state`);
+    const stored = this.storage.getItem(`${STORE}-state-${network}`);
     return stored ? this.sealer.open(JSON.parse(stored)) : null;
   }
 
-  list() {
+  /**
+   * The keys as a network shows them: its addresses and birth heights.
+   */
+
+  list(network) {
     assert(this.unlocked, 'The wallet is locked.');
-    return this.state.keys.map(({name, type, address, born}) => ({
-      name,
-      type,
-      address,
-      born,
-      active: name === this.state.active
+    return this.state.keys.map(key => ({
+      name: key.name,
+      type: key.type,
+      address: this.ring(key.name).getAddress().toString(network),
+      born: key.born[network] != null ? key.born[network] : null,
+      created: key.created,
+      active: key.name === this.state.active
     }));
   }
 
-  active() {
-    assert(this.unlocked, 'The wallet is locked.');
-    return this.state.keys.find(k => k.name === this.state.active) || null;
+  active(network) {
+    return this.list(network).find(k => k.active) || null;
   }
 
   ring(name = this.state.active) {
     assert(this.unlocked, 'The wallet is locked.');
     const key = this.state.keys.find(k => k.name === name);
     assert(key, `No key named ${name}.`);
-    return KeyRing.fromSecret(key.wif, this.network);
+    return KeyRing.fromPrivate(Buffer.from(key.key, 'hex'), true);
   }
 
   /**
-   * A new key (a WIF), born at `height`: it can hold nothing from before.
+   * A new key (a private key), born now: at `height` on `network`.
    */
 
-  async newKey(name, height) {
-    return this.add(KeyRing.generate(), name, {type: 'wif', born: height});
+  async newKey(name, {network, height}) {
+    return this.add(KeyRing.generate(), name, {
+      type: 'wif',
+      created: Date.now(),
+      born: {[network]: height}
+    }, network);
   }
 
   /**
-   * A new recovery phrase (12 words), born at `height`.
+   * A new recovery phrase (12 words), born now.
    * @returns {Promise} {name, address, phrase}
    */
 
-  async newPhrase(name, height) {
+  async newPhrase(name, {network, height}) {
     const phrase = new Mnemonic({bits: 128}).getPhrase();
     const key = await this.add(phraseRing(phrase), name, {
       type: 'mnemonic',
       phrase,
       path: PATH,
-      born: height
-    });
+      created: Date.now(),
+      born: {[network]: height}
+    }, network);
     return {...key, phrase};
   }
 
   /**
-   * A key from text: a recovery phrase, or a WIF. `born`, the height it
-   * was made at if known, saves a scan from the start of the chain.
+   * A key from text: a recovery phrase, or a WIF. `height`, the block on
+   * `network` it was made at if known, saves a scan from the start.
    */
 
-  async importText(text, name, born = null) {
+  async importText(text, name, {network, height = null}) {
     text = text.trim();
+
+    const born = height != null ? {[network]: height} : {};
 
     if (text.split(/\s+/).length >= 12) {
       const phrase = text.toLowerCase().split(/\s+/).join(' ');
@@ -275,19 +364,16 @@ class Vault {
         type: 'mnemonic',
         phrase,
         path: PATH,
+        created: null,
         born
-      });
+      }, network);
     }
 
-    let ring;
-    try {
-      ring = KeyRing.fromSecret(text, this.network);
-    } catch (e) {
-      throw new Error('Not a recovery phrase, or a private key (WIF) for'
-        + ' this network.');
-    }
-
-    return this.add(ring, name, {type: 'wif', born});
+    return this.add(wifRing(text), name, {
+      type: 'wif',
+      created: null,
+      born
+    }, network);
   }
 
   /**
@@ -297,13 +383,13 @@ class Vault {
 
   exportFile() {
     assert(this.unlocked, 'The wallet is locked.');
-    return this.storage.getItem(this.name);
+    return this.storage.getItem(STORE);
   }
 
   /**
    * Take the keys of a wallet file, opened with its password. Keys already
    * here are skipped; a name already taken gets a number.
-   * @returns {Promise} [{name, address}] added
+   * @returns {Promise} [{name}] added
    */
 
   async importFile(text, password) {
@@ -316,15 +402,13 @@ class Vault {
       throw new Error('Not a bcash wallet file.');
     }
 
-    assert(stored.format === FORMAT, 'Not a bcash wallet file.');
-    assert(stored.network === this.network,
-      `That wallet is for ${stored.network}, not ${this.network}.`);
+    assert(stored && stored.format === FORMAT, 'Not a bcash wallet file.');
 
     const {state} = await openVault(stored, password);
     const added = [];
 
     for (const key of state.keys) {
-      if (this.state.keys.some(k => k.address === key.address))
+      if (this.state.keys.some(k => k.key === key.key))
         continue;
 
       let name = key.name;
@@ -332,7 +416,7 @@ class Vault {
         name = `${key.name} ${i}`;
 
       this.state.keys.push({...key, name});
-      added.push({name, address: key.address});
+      added.push({name});
     }
 
     if (!this.state.active && this.state.keys.length > 0)
@@ -343,7 +427,8 @@ class Vault {
     return added;
   }
 
-  async add(ring, name, {type, phrase = null, path = null, born}) {
+  async add(ring, name, {type, phrase = null, path = null, created, born},
+    network) {
     assert(this.unlocked, 'The wallet is locked.');
 
     name = name ? name.trim() : this.nextName();
@@ -352,28 +437,21 @@ class Vault {
     assert(!this.state.keys.some(k => k.name === name),
       `A key is already named ${name}.`);
 
-    const address = ring.getAddress().toString(this.network);
-    assert(!this.state.keys.some(k => k.address === address),
+    const key = ring.getPrivateKey('hex');
+    assert(!this.state.keys.some(k => k.key === key),
       'That key is already in the wallet.');
 
-    assert(born == null || (born >>> 0) === born, 'Bad birth height.');
+    for (const height of Object.values(born))
+      assert(height == null || (height >>> 0) === height, 'Bad birth height.');
 
-    this.state.keys.push({
-      name,
-      type,
-      wif: ring.toSecret(this.network),
-      phrase,
-      path,
-      address,
-      born
-    });
+    this.state.keys.push({name, type, key, phrase, path, created, born});
 
     if (!this.state.active)
       this.state.active = name;
 
     await this.save();
 
-    return {name, address};
+    return {name, address: ring.getAddress().toString(network)};
   }
 
   async use(name) {
@@ -384,16 +462,28 @@ class Vault {
   }
 
   /**
-   * A key's secrets, to back them up: only with the password again.
-   * @returns {Promise} {wif, phrase, path}
+   * Record a key's birth height on a network, once found.
    */
 
-  async reveal(name, password) {
-    const stored = JSON.parse(this.storage.getItem(this.name));
+  async setBorn(name, network, height) {
+    const key = this.state.keys.find(k => k.name === name);
+    assert(key, `No key named ${name}.`);
+    key.born[network] = height;
+    await this.save();
+  }
+
+  /**
+   * A key's secrets, to back them up: only with the password again.
+   * @returns {Promise} {wif (for `network`), phrase, path}
+   */
+
+  async reveal(name, password, network) {
+    const {stored} = this.stored();
     const {state} = await openVault(stored, password);
     const key = state.keys.find(k => k.name === name);
     assert(key, `No key named ${name}.`);
-    return {wif: key.wif, phrase: key.phrase, path: key.path};
+    const ring = KeyRing.fromPrivate(Buffer.from(key.key, 'hex'), true);
+    return {wif: ring.toSecret(network), phrase: key.phrase, path: key.path};
   }
 
   nextName() {

@@ -38,6 +38,11 @@
       * {
         box-sizing: border-box;
       }
+      html {
+        /* The scrollbar's room kept on every tab: a tab long enough to
+           scroll must not move the page sideways. */
+        scrollbar-gutter: stable;
+      }
       body {
         margin: 0;
         background: var(--bg);
@@ -160,6 +165,13 @@
         margin-top: 0;
         margin-right: 0;
       }
+      .icon-button {
+        width: 46px;
+        height: 46px;
+        padding: 0;
+        display: grid;
+        place-items: center;
+      }
       details {
         margin-top: 20px;
       }
@@ -172,10 +184,86 @@
         gap: 10px;
         align-items: center;
       }
-      header select {
+      .spacer {
         flex: 1;
-        width: auto;
-        min-width: 0;
+      }
+      .menu {
+        position: relative;
+      }
+      .menu-button {
+        margin: 0;
+        min-height: 36px;
+        padding: 6px 12px;
+        border-radius: 8px;
+        border-color: transparent;
+        background: none;
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+      }
+      .menu-button:hover, .menu-button[aria-expanded="true"] {
+        border-color: var(--line);
+        background: var(--card);
+      }
+      .menu-button:disabled {
+        opacity: 0.6;
+        cursor: wait;
+      }
+      .caret {
+        font-size: 0.75em;
+        color: var(--muted);
+      }
+      .network-menu .menu-button {
+        font-size: 0.75em;
+        font-weight: 600;
+        letter-spacing: 0.06em;
+        color: var(--muted);
+      }
+      .menu-list {
+        position: absolute;
+        top: calc(100% + 4px);
+        left: 0;
+        z-index: 10;
+        min-width: 180px;
+        padding: 4px;
+        background: var(--card);
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
+      }
+      .menu-list li {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        min-height: 40px;
+        padding: 8px 12px;
+        border-radius: 6px;
+        cursor: pointer;
+        white-space: nowrap;
+      }
+      .menu-list li:hover {
+        background: var(--bg);
+      }
+      .menu-list li.selected {
+        color: var(--accent);
+      }
+      .menu-list .check {
+        margin-left: auto;
+      }
+      .key-menu {
+        display: inline-block;
+      }
+      .key-menu .menu-list {
+        left: 50%;
+        transform: translateX(-50%);
+        text-align: left;
+      }
+      .key-name, .key-menu .menu-button {
+        font-weight: 600;
+        color: var(--muted);
+      }
+      .key-name {
+        padding: 4px 8px;
       }
       .brand {
         font-weight: 700;
@@ -202,6 +290,9 @@
       .chip.wait {
         color: var(--warn);
       }
+      .chip.bad {
+        color: var(--err);
+      }
       .balance {
         text-align: center;
         padding: 28px 0 16px;
@@ -216,6 +307,9 @@
         font-size: 0.45em;
         font-weight: 500;
         color: var(--muted);
+      }
+      .notice.warn {
+        border-left-color: var(--warn);
       }
       .notice {
         background: var(--card);
@@ -352,6 +446,27 @@
       }
       .modal .card {
         width: 100%;
+      }
+      .viewfinder {
+        position: relative;
+        margin: 8px auto;
+        width: min(360px, 80vw);
+        aspect-ratio: 1;
+        overflow: hidden;
+        border-radius: 12px;
+        background: #000;
+      }
+      .viewfinder video {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+      }
+      .viewfinder::after {
+        content: "";
+        position: absolute;
+        inset: 18%;
+        border: 2px solid rgba(255, 255, 255, 0.8);
+        border-radius: 10px;
       }
       .log {
         background: var(--card);

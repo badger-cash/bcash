@@ -20,7 +20,12 @@
  * A coin from a transaction carrying SLP may carry tokens: it is kept
  * apart, never spent as XEC, so an XEC payment cannot burn a token.
  *
- * The state is sealed with the vault's key (vault.saveState).
+ * A key new to this network's state (added on another network, or here
+ * while the node was behind) is scanned once from its birth there, and
+ * then counted as covered.
+ *
+ * The state, one per network, is sealed with the vault's key
+ * (vault.saveState).
  */
 
 const EventEmitter = require('events');
@@ -41,6 +46,7 @@ class Coins extends EventEmitter {
     this.vault = vault;
     this.node = node;
     this.network = node.network.type;
+    this.closed = false;
     this.keys = new Map();
     this.state = null;
     this.saving = null;
@@ -52,18 +58,69 @@ class Coins extends EventEmitter {
    */
 
   async open() {
-    this.state = await this.vault.loadState() || {
+    this.state = await this.vault.loadState(this.network) || {
       coins: {},
       txs: {},
+      covered: {},
       synced: null
     };
 
-    for (const key of this.vault.list())
+    if (!this.state.covered)
+      this.state.covered = {};
+
+    const fresh = this.state.synced == null;
+
+    for (const key of this.vault.list(this.network)) {
       this.watch(key);
+      // A fresh state follows the chain from where it starts: nothing to
+      // scan for.
+      if (fresh)
+        this.state.covered[key.address] = true;
+    }
 
     this.node.on('tx', tx => this.addTX(tx, -1, null));
     this.node.on('connect', (entry, block) => this.addBlock(entry, block));
     this.node.on('disconnect', entry => this.removeBlock(entry));
+  }
+
+  /**
+   * Keys this network's state has not covered yet: each needs a scan from
+   * its birth here (cover).
+   */
+
+  uncovered() {
+    return this.vault.list(this.network)
+      .filter(key => !this.state.covered[key.address]);
+  }
+
+  /**
+   * Scan for a key from `start` to the tip, then count it covered.
+   */
+
+  async cover(key, start) {
+    const entry = this.keys.get(this.vault.ring(key.name)
+      .getKeyHash('hex'));
+
+    if (this.state.synced != null && start <= this.node.chain.height)
+      await this.scan(start, [entry]);
+
+    if (this.closed)
+      return;
+
+    this.state.covered[key.address] = true;
+    this.save();
+  }
+
+  /**
+   * Stop: what is unsaved is saved, and nothing more is taken in.
+   */
+
+  async close() {
+    this.closed = true;
+    this.node.removeAllListeners('tx');
+    this.node.removeAllListeners('connect');
+    this.node.removeAllListeners('disconnect');
+    await this.flush();
   }
 
   /**
@@ -366,7 +423,9 @@ class Coins extends EventEmitter {
       return;
     }
 
-    this.saving = this.vault.saveState(this.state).catch((err) => {
+    const saved = this.vault.saveState(this.network, this.state);
+
+    this.saving = saved.catch((err) => {
       this.emit('error', err);
     }).then(() => {
       this.saving = null;

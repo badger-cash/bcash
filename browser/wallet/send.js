@@ -43,6 +43,30 @@ function parseAddress(text, network) {
 }
 
 /**
+ * What a payment QR code says: an address, as is or as a URI with an
+ * amount in XEC (ecash:q...?amount=12.34).
+ * @returns {Object} {address (with its prefix), value (sats, or null)}
+ */
+
+function parsePaymentURI(text, network) {
+  text = text.trim();
+
+  const [base, query = ''] = text.split('?');
+  const address = parseAddress(base, network).toString(network);
+
+  let value = null;
+  const amount = new URLSearchParams(query).get('amount');
+  if (amount != null) {
+    const m = /^(\d{1,12})(?:\.(\d{1,2}))?$/.exec(amount.trim());
+    if (!m)
+      throw new Error('The code\'s amount is not one this wallet reads.');
+    value = Number(m[1]) * 100 + Number((m[2] || '').padEnd(2, '0'));
+  }
+
+  return {address, value};
+}
+
+/**
  * Build and sign a payment.
  * @param {Object} options
  * @param {Coins} options.coins
@@ -114,5 +138,6 @@ async function sendPayment({coins, node, tx}) {
 
 exports.RATE = RATE;
 exports.parseAddress = parseAddress;
+exports.parsePaymentURI = parsePaymentURI;
 exports.buildPayment = buildPayment;
 exports.sendPayment = sendPayment;

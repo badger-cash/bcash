@@ -175,6 +175,39 @@ describe('WebTransport', function() {
         }
       });
 
+    it('should not connect once destroyed while dialing', async () => {
+      const {connect} = require('../lib/net/webtransport');
+
+      // A session that comes up after its socket was given up on.
+      let closed = false;
+      let up = null;
+      class FakeTransport {
+        constructor() {
+          this.ready = new Promise(r => (up = r));
+        }
+
+        close() {
+          closed = true;
+        }
+
+        async createBidirectionalStream() {
+          throw new Error('not asked for');
+        }
+      }
+
+      const socket = connect(FakeTransport, '127.0.0.1', 4433, []);
+      const seen = [];
+      socket.on('connect', () => seen.push('connect'));
+      socket.on('error', e => seen.push(e.message));
+
+      socket.destroy();
+      up();
+      await new Promise(r => setTimeout(r, 10));
+
+      assert.deepStrictEqual(seen, []);
+      assert(closed);
+    });
+
     it('should say what is missing without the optional module',
       async () => {
         const wt = new WebTransportServer({

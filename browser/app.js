@@ -11,22 +11,25 @@
 
 /*
  * The page: a wallet on bcash's SPV node in the browser. Its keys are
- * sealed with a password (wallet/vault.js), its coins tracked from the
- * node (wallet/coins.js), payments built and signed here
+ * sealed with a password (wallet/vault.js) and belong to no network; each
+ * network has its own node, chain and coins (wallet/coins.js), and the
+ * page switches between them in place. Payments are built and signed here
  * (wallet/send.js). The node peers with bcash full nodes over
  * WebTransport, from the newest checkpoint built in.
  */
 
 const qrcode = require('qrcode-generator');
+const jsQR = require('jsqr');
 const bcash = require('./spv');
 const {Vault} = require('./wallet/vault');
 const {Coins} = require('./wallet/coins');
-const {buildPayment, sendPayment} = require('./wallet/send');
+const {buildPayment, sendPayment, parsePaymentURI}
+  = require('./wallet/send');
 
-const params = new URLSearchParams(location.search);
-const network = params.get('network') || 'testnet';
-const anchor = bcash.newestCheckpoint(network);
-const ticker = network === 'main' ? 'XEC' : 'tXEC';
+const NETWORKS = [
+  {id: 'main', label: 'Mainnet', ticker: 'XEC'},
+  {id: 'testnet', label: 'Testnet', ticker: 'tXEC'}
+];
 
 const $ = id => document.getElementById(id);
 
@@ -65,10 +68,6 @@ const toSats = (text) => {
 const short = (s, n = 8) => s.length > 2 * n + 3
   ? `${s.slice(0, n)}...${s.slice(-n)}` : s;
 
-const explorer = txid => network === 'main'
-  ? `https://explorer.e.cash/tx/${txid}`
-  : `https://texplorer.bitcoinabc.org/tx/${txid}`;
-
 const copy = async (text, button) => {
   try {
     await navigator.clipboard.writeText(text);
@@ -89,11 +88,97 @@ const download = (name, text) => {
   URL.revokeObjectURL(url);
 };
 
+/**
+ * Read a QR code with the camera (the rear one, on a phone). On its own
+ * overlay, outside the page's rendering, so the video survives it.
+ * @returns {Promise} the code's text, or null if closed.
+ */
+
+function scanCode() {
+  return new Promise((resolve) => {
+    const video = el('video', {playsinline: true, muted: true});
+    const status = el('p', {class: 'muted small'}, 'Starting the camera...');
+    const canvas = document.createElement('canvas');
+    const context = canvas.getContext('2d', {willReadFrequently: true});
+    let stream = null;
+    let done = false;
+    let overlay = null;
+
+    function finish(text) {
+      if (done)
+        return;
+      done = true;
+      if (stream) {
+        for (const track of stream.getTracks())
+          track.stop();
+      }
+      overlay.remove();
+      document.removeEventListener('keydown', onKey);
+      resolve(text);
+    }
+
+    function onKey(e) {
+      if (e.key === 'Escape')
+        finish(null);
+    }
+
+    overlay = el('div', {class: 'modal scanner'},
+      el('div', {class: 'card narrow center'},
+        el('h2', {}, 'Scan a QR code'),
+        el('div', {class: 'viewfinder'}, video),
+        status,
+        el('button', {onclick: () => finish(null)}, 'Cancel')));
+
+    document.body.append(overlay);
+    document.addEventListener('keydown', onKey);
+
+    const tick = () => {
+      if (done)
+        return;
+      if (video.readyState >= video.HAVE_ENOUGH_DATA) {
+        canvas.width = video.videoWidth;
+        canvas.height = video.videoHeight;
+        context.drawImage(video, 0, 0, canvas.width, canvas.height);
+        const image = context.getImageData(0, 0, canvas.width,
+          canvas.height);
+        const code = jsQR(image.data, image.width, image.height,
+          {inversionAttempts: 'dontInvert'});
+        if (code && code.data) {
+          finish(code.data);
+          return;
+        }
+      }
+      requestAnimationFrame(tick);
+    };
+
+    navigator.mediaDevices.getUserMedia({
+      video: {facingMode: {ideal: 'environment'}},
+      audio: false
+    }).then(async (media) => {
+      stream = media;
+      if (done) {
+        finish(null);
+        return;
+      }
+      video.srcObject = media;
+      await video.play();
+      status.textContent = 'Hold the code in the frame.';
+      requestAnimationFrame(tick);
+    }).catch((err) => {
+      status.textContent = err.name === 'NotAllowedError'
+        ? 'The camera was not allowed. Allow it for this site, or paste'
+          + ' the address.'
+        : `No camera: ${err.message}`;
+      status.className = 'error small';
+    });
+  });
+}
+
 /*
  * State
  */
 
-const vault = new Vault({network, storage: localStorage});
+const vault = new Vault({storage: localStorage});
 
 const ui = {
   screen: vault.exists() ? 'unlock' : 'welcome',
@@ -102,34 +187,55 @@ const ui = {
   notice: null,
   send: null,
   scans: new Map(),
-  modal: null
+  modal: null,
+  menu: null,
+  reveal: null,
+  switching: false,
+  nodeError: null
 };
 
+const asked = new URLSearchParams(location.search).get('network');
+let network = NETWORKS.some(n => n.id === asked) ? asked : 'testnet';
+let anchor = bcash.newestCheckpoint(network);
 let node = null;
 let coins = null;
 
+const net = () => NETWORKS.find(n => n.id === network);
+let ticker = net().ticker;
+
+const explorer = txid => network === 'main'
+  ? `https://explorer.e.cash/tx/${txid}`
+  : `https://texplorer.bitcoinabc.org/tx/${txid}`;
+
 /*
- * Events: a log for the Node tab.
+ * Events: a log for the Node tab, the whole session's, every network's.
  */
 
 const events = [];
+let switched = false;
 
 function log(msg, cls) {
-  events.unshift({time: new Date().toISOString().slice(11, 19), msg, cls});
-  events.length = Math.min(events.length, 300);
+  events.unshift({
+    time: new Date().toISOString().slice(11, 19),
+    // Once both networks have spoken, each line says whose it is.
+    msg: switched ? `[${net().label}] ${msg}` : msg,
+    cls
+  });
   if (ui.tab === 'node')
-    render();
+    scheduleRender();
 }
 
 /*
- * The node: started once the keys are open, so they are watched before
- * any block arrives.
+ * The node: one per network, started once the keys are open, so they are
+ * watched before any block arrives.
  */
 
 async function startNode() {
-  node = new bcash.SPVNode({
+  ui.nodeError = null;
+
+  const started = new bcash.SPVNode({
     network,
-    prefix: `/bcash/anchor-${anchor.height}`,
+    prefix: `/bcash/${network}-anchor-${anchor.height}`,
     anchor,
     memory: false,
     workers: false,
@@ -138,7 +244,7 @@ async function startNode() {
     wtStore: bcash.localStore(`bcash-wthosts-${network}`)
   });
 
-  const {pool} = node;
+  const {pool} = started;
 
   const dial = pool.options.createSocket;
   pool.options.createSocket = (port, host) => {
@@ -157,89 +263,212 @@ async function startNode() {
     if (connected)
       log(`Disconnected from ${peer.hostname()}.`);
   });
-  node.on('error', err => log(`Error: ${err.message}`, 'err'));
+  started.on('error', err => log(`Error: ${err.message}`, 'err'));
 
-  log(`Starting at checkpoint ${num(anchor.height)}, built into this bcash.`);
-  await node.open();
-  log(`Chain open at ${num(node.chain.height)}.`);
+  log(`${net().label}: starting at checkpoint ${num(anchor.height)}, built`
+    + ' into this bcash.');
 
-  coins = new Coins({vault, node});
-  coins.on('change', () => render());
-  coins.on('error', err => log(`Error: ${err.message}`, 'err'));
-  coins.on('scan', (scan) => {
+  try {
+    await started.open();
+  } catch (e) {
+    ui.nodeError = started.network.wtSeeds.length === 0
+      && pool.wtHosts.size === 0
+      ? `No bcash node serves ${net().label} over WebTransport yet, so this`
+        + ' wallet cannot sync it. Your keys and addresses are here.'
+      : `Could not open the chain: ${e.message}`;
+    log(ui.nodeError, 'err');
+    return;
+  }
+
+  log(`Chain open at ${num(started.chain.height)}.`);
+
+  const tracked = new Coins({vault, node: started});
+  tracked.on('change', () => scheduleRender());
+  tracked.on('error', err => log(`Error: ${err.message}`, 'err'));
+  tracked.on('scan', (scan) => {
     if (scan.done)
       ui.scans.delete(scan.start);
     else
       ui.scans.set(scan.start, scan);
-    render();
+    scheduleRender();
   });
-  await coins.open();
+  await tracked.open();
 
-  node.chain.on('connect', () => scheduleRender());
-  node.chain.on('full', () => log('Synced: following the tip.'));
+  started.chain.on('connect', () => scheduleRender());
+  started.chain.on('full', () => log('Synced: following the tip.'));
 
-  await node.connect();
-  node.startSync();
+  node = started;
+  coins = tracked;
 
-  // What came in while the page was closed.
+  await started.connect();
+  started.startSync();
+
+  // What came in while the page was closed, and keys new to this network.
   coins.catchUp().catch(err => log(`Scan: ${err.message}`, 'err'));
-
-  // Not while a list is open: rebuilt, it would close.
-  setInterval(() => {
-    const active = document.activeElement;
-    if (!active || active.tagName !== 'SELECT')
-      render();
-  }, 1000);
+  for (const key of coins.uncovered())
+    cover(key);
 }
 
-let pending = false;
-function scheduleRender() {
-  if (pending)
+async function stopNode() {
+  const [stopping, tracked] = [node, coins];
+  node = null;
+  coins = null;
+  ui.scans.clear();
+
+  if (tracked)
+    await tracked.close();
+  if (stopping)
+    await stopping.close().catch(() => {});
+}
+
+/**
+ * Switch networks in place: the other network's node, chain and coins;
+ * the same keys, as its addresses.
+ */
+
+async function switchNetwork(id) {
+  if (id === network || ui.switching)
     return;
-  pending = true;
-  requestAnimationFrame(() => {
-    pending = false;
+
+  ui.switching = true;
+  ui.menu = null;
+  ui.send = null;
+  ui.notice = null;
+  render();
+
+  try {
+    await stopNode();
+
+    network = id;
+    anchor = bcash.newestCheckpoint(network);
+    ticker = net().ticker;
+
+    const url = new URL(location.href);
+    url.searchParams.set('network', network);
+    history.replaceState(null, '', url);
+
+    switched = true;
+    await startNode();
+  } finally {
+    ui.switching = false;
     render();
-  });
+  }
+}
+
+/**
+ * Where a key's scan starts on this network: its birth height here; else
+ * the block made when it was (by block times); else the anchor.
+ */
+
+async function startFor(key) {
+  const floor = anchor.height + 1;
+
+  if (key.born != null)
+    return Math.max(key.born, floor);
+
+  if (key.created != null) {
+    const height = await heightAt(key.created / 1000 - 2 * 60 * 60);
+    await vault.setBorn(key.name, network, height);
+    return Math.max(height, floor);
+  }
+
+  ui.notice = `${key.name}: scanning from checkpoint ${num(anchor.height)}.`
+    + ' Coins it held only before that are not found yet.';
+  return floor;
+}
+
+/**
+ * The first block at or after a time, from the chain this page holds.
+ */
+
+async function heightAt(time) {
+  const {chain} = node;
+  let lo = anchor.height;
+  let hi = chain.height;
+
+  if ((await chain.getEntryByHeight(hi)).time < time)
+    return hi;
+
+  while (lo < hi) {
+    const mid = Math.floor((lo + hi) / 2);
+    const entry = await chain.getEntryByHeight(mid);
+    if (entry && entry.time < time)
+      lo = mid + 1;
+    else
+      hi = mid;
+  }
+
+  return lo;
+}
+
+function cover(key) {
+  const tracked = coins;
+  startFor(key)
+    .then(start => tracked.cover(key, start))
+    .then(() => log(`Scan for ${key.name} done.`))
+    .catch(err => log(`Scan for ${key.name}: ${err.message}`, 'err'));
 }
 
 /**
  * Watch a key just added, and scan for what it holds from its birth.
  */
 
-async function adopt({name}) {
-  const key = vault.list().find(k => k.name === name);
+function adopt({name}) {
+  if (!coins)
+    return;
+  const key = vault.list(network).find(k => k.name === name);
   coins.watch(key);
-
-  const tip = node.chain.height;
-  let start = key.born;
-
-  if (start == null || start <= anchor.height) {
-    start = anchor.height + 1;
-    if (key.born == null || key.born < anchor.height) {
-      ui.notice = `${name}: scanning from checkpoint ${num(anchor.height)}.`
-        + ' Coins it held only before that are not found yet.';
-    }
-  }
-
-  if (start <= tip) {
-    const entry = coins.keys.get(vault.ring(name).getKeyHash('hex'));
-    coins.scan(start, [entry])
-      .then(() => log(`Scan for ${name} done.`))
-      .catch(err => log(`Scan for ${name}: ${err.message}`, 'err'));
-  }
+  cover(key);
 }
 
 const bornNow = () => (node ? node.chain.height : anchor.height);
 
 /*
- * Screens
+ * Rendering
  */
 
-function render() {
-  const app = $('app');
-  let view;
+// A render replaces the page's elements: one between a press and its
+// release would swallow the click (the press and release on different
+// elements). So renders wait while a pointer is down, and during sync,
+// when every block asks for one, come at most four times a second.
+let pressed = false;
+let deferred = false;
+let pending = false;
 
+document.addEventListener('pointerdown', () => {
+  pressed = true;
+}, true);
+
+for (const type of ['pointerup', 'pointercancel']) {
+  document.addEventListener(type, () => {
+    pressed = false;
+    if (deferred) {
+      deferred = false;
+      // After the click this release makes, which may change the state.
+      setTimeout(render, 0);
+    }
+  }, true);
+}
+
+function scheduleRender() {
+  if (pending)
+    return;
+  pending = true;
+  setTimeout(() => {
+    pending = false;
+    render();
+  }, 250);
+}
+
+function render() {
+  if (pressed) {
+    deferred = true;
+    return;
+  }
+
+  const app = $('app');
+
+  let view;
   switch (ui.screen) {
     case 'welcome':
       view = welcome();
@@ -255,10 +484,17 @@ function render() {
       break;
   }
 
-  // Keep what is being typed, and a file chosen.
+  const root = el('div', {}, view, ui.modal ? ui.modal() : null);
+
+  // Keep what is being typed, where, a file chosen, and how far a box with
+  // its own scrollbar was scrolled.
+  const scrolls = {};
+  for (const box of app.querySelectorAll('[data-scroll]'))
+    scrolls[box.dataset.scroll] = box.scrollTop;
+
   const active = document.activeElement;
-  const keep = active && active.id ? {id: active.id, value: active.value,
-    start: active.selectionStart} : null;
+  const keep = active && active.id && app.contains(active)
+    ? {id: active.id, start: active.selectionStart} : null;
   const values = {};
   const files = {};
   for (const input of app.querySelectorAll('input, textarea')) {
@@ -270,11 +506,11 @@ function render() {
       values[input.id] = input.value;
   }
 
-  app.replaceChildren(view);
+  app.replaceChildren(root);
 
   for (const [id, value] of Object.entries(values)) {
     const input = $(id);
-    if (input)
+    if (input && input.type !== 'file')
       input.value = value;
   }
   for (const [id, old] of Object.entries(files)) {
@@ -282,6 +518,11 @@ function render() {
     if (input && old.files.length > 0)
       input.replaceWith(old);
   }
+  for (const box of app.querySelectorAll('[data-scroll]')) {
+    if (scrolls[box.dataset.scroll] != null)
+      box.scrollTop = scrolls[box.dataset.scroll];
+  }
+
   if (keep && $(keep.id)) {
     $(keep.id).focus();
     try {
@@ -290,10 +531,32 @@ function render() {
       ;
     }
   }
-
-  if (ui.modal)
-    app.append(ui.modal());
 }
+
+// Each second, for the sync state: not while a dialog or menu is open, or
+// while typing.
+setInterval(() => {
+  if (ui.screen !== 'main' || ui.modal || ui.menu)
+    return;
+  const active = document.activeElement;
+  if (active && ['INPUT', 'TEXTAREA', 'SELECT'].includes(active.tagName))
+    return;
+  render();
+}, 1000);
+
+document.addEventListener('click', (e) => {
+  if (ui.menu && !e.target.closest('.menu')) {
+    ui.menu = null;
+    render();
+  }
+});
+
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && (ui.menu || ui.modal)) {
+    ui.menu = null;
+    closeModal();
+  }
+});
 
 const error = () => ui.error
   ? el('p', {class: 'error'}, ui.error) : null;
@@ -308,13 +571,59 @@ const busy = async (fn) => {
   render();
 };
 
+/**
+ * A small menu: a button with a caret, and its choices below.
+ */
+
+function menu(id, label, items, onselect, cls = '') {
+  const open = ui.menu === id;
+  return el('div', {class: `menu ${cls}`},
+    el('button', {
+      class: 'menu-button',
+      'aria-haspopup': 'listbox',
+      'aria-expanded': open ? 'true' : 'false',
+      disabled: ui.switching,
+      onclick: () => {
+        ui.menu = open ? null : id;
+        render();
+      }
+    }, label, el('span', {class: 'caret'}, open ? '▴' : '▾')),
+    open ? el('ul', {class: 'menu-list', role: 'listbox'},
+      ...items.map(item => el('li', {
+        role: 'option',
+        'aria-selected': item.selected ? 'true' : 'false',
+        class: item.selected ? 'selected' : '',
+        onclick: (e) => {
+          e.stopPropagation();
+          ui.menu = null;
+          if (!item.selected)
+            onselect(item.value);
+          else
+            render();
+        }
+      }, el('span', {}, item.label),
+      item.detail ? el('span', {class: 'muted small'}, item.detail) : null,
+      item.selected ? el('span', {class: 'check'}, '✓') : null))) : null);
+}
+
+function closeModal() {
+  ui.modal = null;
+  ui.reveal = null;
+  ui.error = null;
+  render();
+}
+
+/*
+ * Screens
+ */
+
 function welcome() {
   return el('div', {class: 'card narrow'},
     el('h1', {}, 'bcash wallet'),
     el('p', {class: 'muted'},
-      `An eCash wallet in your browser, on ${network}. It syncs from bcash`
-      + ' nodes over WebTransport and checks everything itself: no server'
-      + ' holds your keys or sees your addresses.'),
+      'An eCash wallet in your browser. It syncs from bcash nodes over'
+      + ' WebTransport and checks everything itself: no server holds your'
+      + ' keys or sees your addresses.'),
     el('label', {for: 'pw1'}, 'Choose a password'),
     el('input', {id: 'pw1', type: 'password', autocomplete: 'new-password'}),
     el('label', {for: 'pw2'}, 'Again'),
@@ -334,7 +643,7 @@ function welcome() {
 function unlock() {
   return el('div', {class: 'card narrow'},
     el('h1', {}, 'bcash wallet'),
-    el('p', {class: 'muted'}, `Unlock your ${network} wallet.`),
+    el('p', {class: 'muted'}, 'Unlock your wallet.'),
     el('label', {for: 'pw'}, 'Password'),
     el('input', {id: 'pw', type: 'password', autocomplete: 'current-password',
       onkeydown: e => e.key === 'Enter' && $('unlock').click()}),
@@ -346,7 +655,8 @@ function unlock() {
         // Deriving the key takes a moment.
         $('unlock').textContent = 'Unlocking...';
         await vault.unlock($('pw').value);
-        ui.screen = vault.list().length > 0 ? 'main' : 'first';
+        ui.screen = vault.list(network).length > 0 ? 'main' : 'first';
+        render();
         if (ui.screen === 'main')
           await startNode();
       })
@@ -374,17 +684,19 @@ function firstKey() {
     el('button', {class: 'primary', onclick: () => busy(async () => {
       // Born at the anchor, where this page's chain starts: it can hold
       // nothing older.
-      const made = await vault.newPhrase('Main', anchor.height);
+      const made = await vault.newPhrase('Main', {network,
+        height: anchor.height});
       ui.screen = 'main';
-      await startNode();
       showPhrase(made);
+      await startNode();
     })}, 'New recovery phrase'),
     el('hr'),
     importForm(async (key) => {
       ui.screen = 'main';
+      render();
       await startNode();
       if (key)
-        await adopt(key);
+        adopt(key);
     }));
 }
 
@@ -403,7 +715,7 @@ function importForm(done) {
         el('label', {for: 'imp-name'}, 'Name'),
         el('input', {id: 'imp-name', placeholder: 'optional'})),
       el('div', {},
-        el('label', {for: 'imp-born'}, 'Made at block'),
+        el('label', {for: 'imp-born'}, `Made at ${net().label} block`),
         el('input', {id: 'imp-born', placeholder: 'optional',
           inputmode: 'numeric'}))),
     el('p', {class: 'muted small'},
@@ -414,7 +726,8 @@ function importForm(done) {
       if (born && !/^\d+$/.test(born))
         throw new Error('The block height is a number.');
       const key = await vault.importText($('imp-text').value,
-        $('imp-name').value || null, born ? Number(born) : null);
+        $('imp-name').value || null,
+        {network, height: born ? Number(born) : null});
       for (const id of ['imp-text', 'imp-name', 'imp-born'])
         $(id).value = '';
       await done(key);
@@ -432,10 +745,11 @@ function importForm(done) {
         $('imp-file-pw').value);
       if (added.length === 0)
         throw new Error('Every key in that file is already here.');
+      $('imp-file-pw').value = '';
       ui.notice = `Imported ${added.map(k => k.name).join(', ')}.`;
       await done(null);
       for (const key of added)
-        await adopt(key);
+        adopt(key);
     })}, 'Import wallet file'));
 }
 
@@ -448,10 +762,8 @@ function showPhrase({name, phrase}) {
         + ' a lost password loses the key.'),
       el('ol', {class: 'words'},
         ...phrase.split(' ').map(w => el('li', {}, w))),
-      el('button', {class: 'primary', onclick: () => {
-        ui.modal = null;
-        render();
-      }}, 'I have written it down')));
+      el('button', {class: 'primary', onclick: closeModal},
+        'I have written it down')));
   render();
 }
 
@@ -460,7 +772,8 @@ function showPhrase({name, phrase}) {
  */
 
 function main() {
-  const key = vault.active();
+  const key = vault.active(network);
+  const keys = vault.list(network);
   const bal = coins ? coins.balance(key.address)
     : {confirmed: 0, unconfirmed: 0, locked: 0, immature: 0, total: 0};
 
@@ -486,15 +799,27 @@ function main() {
       break;
   }
 
+  const keyLabel = keys.length > 1
+    ? menu('key', key.name, keys.map(k => ({
+      value: k.name,
+      label: k.name,
+      detail: short(k.address.split(':')[1], 5),
+      selected: k.active
+    })), name => busy(() => vault.use(name)), 'key-menu')
+    : el('div', {class: 'key-name'}, key.name);
+
   return el('div', {class: 'shell'},
     el('header', {},
-      el('div', {class: 'brand'}, 'bcash', el('span', {}, network)),
-      el('select', {id: 'key-select', 'aria-label': 'Key', onchange: e => busy(
-        () => vault.use(e.target.value))},
-      ...vault.list().map(k => el('option', {value: k.name,
-        selected: k.active}, k.name))),
+      el('div', {class: 'brand'}, 'bcash'),
+      menu('network', net().label.toUpperCase(), NETWORKS.map(n => ({
+        value: n.id,
+        label: n.label,
+        selected: n.id === network
+      })), id => switchNetwork(id), 'network-menu'),
+      el('div', {class: 'spacer'}),
       syncChip()),
     el('section', {class: 'balance'},
+      keyLabel,
       el('div', {class: 'amount'}, xec(bal.total),
         el('span', {}, ` ${ticker}`)),
       el('div', {class: 'muted small'}, [
@@ -502,6 +827,9 @@ function main() {
         bal.immature ? `${xec(bal.immature)} maturing` : null,
         bal.locked ? `${xec(bal.locked)} in token coins, kept apart` : null
       ].filter(Boolean).join(' · ') || short(key.address, 12))),
+    ui.switching ? el('p', {class: 'notice'},
+      `Switching to ${net().label}...`) : null,
+    ui.nodeError ? el('p', {class: 'notice warn'}, ui.nodeError) : null,
     ui.notice ? el('p', {class: 'notice', onclick: () => {
       ui.notice = null;
       render();
@@ -519,6 +847,10 @@ function main() {
 }
 
 function syncState() {
+  if (ui.switching)
+    return {text: 'Switching', cls: 'wait'};
+  if (ui.nodeError)
+    return {text: 'No node', cls: 'bad'};
   if (!node)
     return {text: 'Starting', cls: 'wait'};
 
@@ -561,9 +893,13 @@ function scanBar() {
     + ` ${pct.toFixed(0)}%`);
 }
 
+const unavailable = () => el('div', {class: 'empty'},
+  el('p', {}, ui.nodeError ? 'Not syncing.' : 'Opening...'),
+  ui.nodeError ? el('p', {class: 'muted small'}, ui.nodeError) : null);
+
 function walletTab(key) {
   if (!coins)
-    return el('p', {class: 'muted'}, 'Opening...');
+    return unavailable();
 
   const history = coins.history(key.address);
   const tip = node.chain.height;
@@ -572,7 +908,7 @@ function walletTab(key) {
     return el('div', {class: 'empty'},
       el('p', {}, 'No transactions yet.'),
       el('p', {class: 'muted small'}, node.chain.synced
-        ? 'Receive some XEC to see them here.'
+        ? `Receive some ${ticker} to see them here.`
         : 'Still syncing: they appear as blocks arrive.'));
   }
 
@@ -598,7 +934,7 @@ function walletTab(key) {
 
 function sendTab(key, bal) {
   if (!coins)
-    return el('p', {class: 'muted'}, 'Opening...');
+    return unavailable();
 
   const spendable = coins.spendable(key.address)
     .reduce((s, c) => s + c.value, 0);
@@ -638,14 +974,28 @@ function sendTab(key, bal) {
         })}, 'Send')));
   }
 
+  const scan = () => busy(async () => {
+    const text = await scanCode();
+    if (text == null)
+      return;
+    const {address, value} = parsePaymentURI(text, network);
+    $('to').value = address;
+    if (value != null)
+      $('amount').value = xec(value).replace(/,/g, '');
+  });
+
   return el('div', {class: 'card'},
     el('label', {for: 'to'}, 'To'),
-    el('input', {id: 'to', placeholder: network === 'main'
-      ? 'ecash:...' : 'ectest:...', autocomplete: 'off', spellcheck: 'false'}),
+    el('div', {class: 'row'},
+      el('input', {id: 'to', placeholder: network === 'main'
+        ? 'ecash:...' : 'ectest:...', autocomplete: 'off',
+      spellcheck: 'false'}),
+      navigator.mediaDevices && navigator.mediaDevices.getUserMedia
+        ? qrButton(scan) : null),
     el('label', {for: 'amount'}, `Amount (${ticker})`),
     el('div', {class: 'row'},
       el('input', {id: 'amount', inputmode: 'decimal', placeholder: '0.00'}),
-      el('button', {class: 'small-btn', onclick: () => busy(async () => {
+      el('button', {onclick: () => busy(async () => {
         const built = await buildPayment({coins, ring: vault.ring(),
           address: key.address, to: $('to').value, max: true});
         ui.send = {review: {...built, to: $('to').value.trim()}};
@@ -663,6 +1013,33 @@ function sendTab(key, bal) {
         address: key.address, to: $('to').value, value});
       ui.send = {review: {...built, to: $('to').value.trim()}};
     })}, 'Review'));
+}
+
+/**
+ * The scan button: the QR code icon.
+ */
+
+function qrButton(onclick) {
+  const button = el('button', {
+    class: 'icon-button',
+    onclick,
+    title: 'Scan a QR code',
+    'aria-label': 'Scan a QR code'
+  });
+
+  // Three finder squares and a few modules: the icon people know.
+  button.innerHTML = '<svg viewBox="0 0 24 24" width="22" height="22"'
+    + ' fill="none" stroke="currentColor" stroke-width="2"'
+    + ' aria-hidden="true">'
+    + '<rect x="3" y="3" width="7" height="7" rx="1"/>'
+    + '<rect x="14" y="3" width="7" height="7" rx="1"/>'
+    + '<rect x="3" y="14" width="7" height="7" rx="1"/>'
+    + '<path d="M14 14h3v3h-3zM20 14v.01M14 20h.01M17 20h4v-3"'
+    + ' stroke-linecap="round" stroke-linejoin="round"/>'
+    + '<path d="M6 6h1v1H6zM17 6h1v1h-1zM6 17h1v1H6z" fill="currentColor"/>'
+    + '</svg>';
+
+  return button;
 }
 
 function receiveTab(key) {
@@ -685,7 +1062,7 @@ function receiveTab(key) {
 }
 
 function keysTab() {
-  const keys = vault.list();
+  const keys = vault.list(network);
 
   return el('div', {},
     el('ul', {class: 'keys'}, ...keys.map(k => el('li', {},
@@ -695,7 +1072,8 @@ function keysTab() {
           ? 'phrase' : 'WIF')),
         el('div', {class: 'mono small'}, k.address),
         el('div', {class: 'muted small'}, k.born != null
-          ? `Made at block ${num(k.born)}` : 'Made at: unknown')),
+          ? `Made at ${net().label} block ${num(k.born)}`
+          : `Made at: not known on ${net().label}`)),
       el('div', {class: 'actions'},
         k.active ? null : el('button', {onclick: () => busy(
           () => vault.use(k.name))}, 'Use'),
@@ -706,29 +1084,31 @@ function keysTab() {
         el('input', {id: 'new-name', placeholder: 'Name (optional)'}),
         el('button', {onclick: () => busy(async () => {
           const made = await vault.newPhrase($('new-name').value || null,
-            bornNow());
-          await adopt(made);
+            {network, height: bornNow()});
+          $('new-name').value = '';
+          adopt(made);
           showPhrase(made);
         })}, 'New phrase'),
         el('button', {onclick: () => busy(async () => {
           const made = await vault.newKey($('new-name').value || null,
-            bornNow());
-          await adopt(made);
+            {network, height: bornNow()});
+          $('new-name').value = '';
+          adopt(made);
           ui.notice = `Made ${made.name}. Back it up from its Back up button.`;
         })}, 'New WIF key')),
       el('hr'),
       importForm(async (key) => {
         if (key) {
           ui.notice = `Imported ${key.name}.`;
-          await adopt(key);
+          adopt(key);
         }
       })),
     el('div', {class: 'card'},
       el('h2', {}, 'Wallet file'),
-      el('p', {class: 'muted small'}, 'Every key, phrase and the block it was'
-        + ' made at, encrypted with your password: import it in another'
-        + ' browser to restore the wallet, with a fast sync.'),
-      el('button', {onclick: () => download(`bcash-wallet-${network}.json`,
+      el('p', {class: 'muted small'}, 'Every key, phrase and when it was'
+        + ' made, encrypted with your password, for every network: import'
+        + ' it in another browser to restore the wallet, with a fast sync.'),
+      el('button', {onclick: () => download('bcash-wallet.json',
         vault.exportFile())}, 'Download wallet file'),
       el('button', {onclick: () => location.reload()}, 'Lock')),
     error());
@@ -746,28 +1126,33 @@ function revealKey(k) {
             `Recovery phrase (${ui.reveal.path})`),
           el('ol', {class: 'words'},
             ...ui.reveal.phrase.split(' ').map(w => el('li', {}, w)))) : null,
-        el('p', {class: 'muted small'}, 'Private key (WIF)'),
+        el('p', {class: 'muted small'}, `Private key (WIF, ${net().label})`),
         el('p', {class: 'mono small'}, ui.reveal.wif))
         : el('div', {},
           el('label', {for: 'reveal-pw'}, 'Password'),
           el('input', {id: 'reveal-pw', type: 'password',
-            autocomplete: 'current-password'}),
+            autocomplete: 'current-password',
+            onkeydown: e => e.key === 'Enter' && $('reveal-show').click()}),
           error(),
-          el('button', {class: 'primary', onclick: () => busy(async () => {
-            ui.reveal = await vault.reveal(k.name, $('reveal-pw').value);
-          })}, 'Show')),
-      el('button', {onclick: () => {
-        ui.modal = null;
-        ui.reveal = null;
-        ui.error = null;
-        render();
-      }}, 'Close')));
+          el('button', {id: 'reveal-show', class: 'primary',
+            onclick: () => busy(async () => {
+              ui.reveal = await vault.reveal(k.name, $('reveal-pw').value,
+                network);
+            })}, 'Show')),
+      el('button', {onclick: closeModal}, 'Close')));
   render();
+  $('reveal-pw').focus();
 }
 
 function nodeTab() {
-  if (!node)
-    return el('p', {class: 'muted'}, 'Starting...');
+  if (!node) {
+    return el('div', {},
+      unavailable(),
+      el('h2', {}, 'Events'),
+      el('pre', {class: 'log', 'data-scroll': 'log'},
+        ...events.map(e => el('div',
+        {class: e.cls || ''}, `${e.time} ${e.msg}`))));
+  }
 
   const {pool, chain} = node;
   const {best} = syncState();
@@ -794,7 +1179,7 @@ function nodeTab() {
   return el('div', {},
     el('div', {class: 'card'},
       el('dl', {},
-        el('dt', {}, 'Network'), el('dd', {}, network),
+        el('dt', {}, 'Network'), el('dd', {}, net().label),
         el('dt', {}, 'Height'), el('dd', {}, `${num(chain.height)}`
           + (chain.tip ? ` (block of ${new Date(chain.tip.time * 1000)
             .toISOString().slice(0, 10)})` : '')),
@@ -809,7 +1194,8 @@ function nodeTab() {
     el('h2', {}, 'Peers'),
     el('ul', {class: 'peers'}, ...rows),
     el('h2', {}, 'Events'),
-    el('pre', {class: 'log'}, ...events.map(e => el('div',
+    el('pre', {class: 'log', 'data-scroll': 'log'},
+      ...events.map(e => el('div',
       {class: e.cls || ''}, `${e.time} ${e.msg}`))));
 }
 
@@ -831,8 +1217,15 @@ if (typeof WebTransport !== 'function') {
   render();
 }
 
-window.wallet = {vault, get node() {
-  return node;
-}, get coins() {
-  return coins;
-}};
+window.wallet = {
+  vault,
+  get network() {
+    return network;
+  },
+  get node() {
+    return node;
+  },
+  get coins() {
+    return coins;
+  }
+};
