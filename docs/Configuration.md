@@ -95,6 +95,19 @@ Note that certain chain options affect the format and indexing of the chain data
 - `port`: Port to listen on (default: 8333).
 - `public-host`: Public host to advertise on network.
 - `public-port`: Public port to advertise on network.
+- `wt-port`: UDP port for P2P over WebTransport, so browsers can connect
+  (default: off). The node makes its own self-signed ECDSA P-256 certificate,
+  which a page pins by hash, and replaces it before its 13 days run out.
+  Needs the optional dependency `@fails-components/webtransport`.
+- `wt-host`: Host to listen on for WebTransport, also named in the
+  certificate (default: `public-host`, else 0.0.0.0).
+- `wt-max-inbound`: Max number of inbound peers over WebTransport, pages,
+  apart from `max-inbound` for those over TCP (default: 64).
+- `wt-seed-port`: UDP port to serve WebTransport as a seed, with a
+  certificate for the node's domain (default: off). A page dials a seed by
+  its domain name, as a DNS seed, to learn the nodes it knows.
+- `wt-seed-cert`, `wt-seed-key`: The seed's certificate (full chain) and
+  key, PEM files, as from Let's Encrypt; reloaded hourly once renewed.
 - `nodes`: List of target nodes to connect to (comma-separated).
 
 ## Miner Options
