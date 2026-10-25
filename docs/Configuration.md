@@ -89,25 +89,27 @@ Note that certain chain options affect the format and indexing of the chain data
 - `bip37`: Enable serving of bip37 merkleblocks (default: false).
 - `listen`: Accept incoming connections (default: true).
 - `max-outbound`: Max number of outbound connections (default: 8).
-- `max-inbound`: Max number of inbound connections (default: 30).
+- `max-inbound`: Max number of inbound connections over TCP (default: 8).
 - `seeds`: Custom list of DNS seeds (comma-separated).
 - `host`: Host to listen on (default: 0.0.0.0).
 - `port`: Port to listen on (default: 8333).
 - `public-host`: Public host to advertise on network.
 - `public-port`: Public port to advertise on network.
-- `wt-port`: UDP port for P2P over WebTransport, so browsers can connect
-  (default: off). The node makes its own self-signed ECDSA P-256 certificate,
-  which a page pins by hash, and replaces it before its 13 days run out.
-  Needs the optional dependency `@fails-components/webtransport`.
-- `wt-host`: Host to listen on for WebTransport, also named in the
-  certificate (default: `public-host`, else 0.0.0.0).
-- `wt-max-inbound`: Max number of inbound peers over WebTransport, pages,
-  apart from `max-inbound` for those over TCP (default: 64).
-- `wt-seed-port`: UDP port to serve WebTransport as a seed, with a
-  certificate for the node's domain (default: off). A page dials a seed by
-  its domain name, as a DNS seed, to learn the nodes it knows.
+- `wt-port`: UDP port to serve P2P over WebTransport, so web pages can
+  connect (default: off). The node makes its own self-signed certificate,
+  which pages trust by its hash, and replaces it every 13 days. Needs the
+  optional dependency `@fails-components/webtransport`. See
+  [Running in the browser](Running-in-the-browser.md).
+- `wt-host`: Public IP address for WebTransport. Pages dial it, and the
+  certificate is issued for it (default: `public-host`).
+- `wt-max-inbound`: Max number of inbound WebTransport connections (pages),
+  counted separately from `max-inbound` (default: 64).
+- `wt-seed-port`: UDP port to serve WebTransport as a seed, using a normal
+  certificate for the node's domain name (default: off). Pages that don't know
+  any nodes yet dial a seed by name to find some.
 - `wt-seed-cert`, `wt-seed-key`: The seed's certificate (full chain) and
-  key, PEM files, as from Let's Encrypt; reloaded hourly once renewed.
+  private key, as PEM files, such as those from Let's Encrypt. The node
+  reloads them within an hour of a renewal.
 - `nodes`: List of target nodes to connect to (comma-separated).
 
 ## Miner Options

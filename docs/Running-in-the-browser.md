@@ -1,120 +1,245 @@
-# Running in the browser
+# Running bcash in the browser
 
-bcash's SPV node runs in a web page with no proxy. The page keeps its chain
-in IndexedDB and peers with bcash full nodes over the browser's own
-WebTransport. The page and the nodes are independent: serve the page from
-any web server, and it finds the nodes itself.
+bcash can run as an SPV node inside an ordinary web page. The page connects
+straight to bcash full nodes, checks the chain itself, and keeps its data in
+the browser. There is no proxy server, no proxy node, and no backend: the page
+is a handful of static files.
 
-## Finding nodes
+This makes two things possible:
 
-- **Seeds.** Each network lists WebTransport seeds (`wtSeeds` in
-  `lib/protocol/networks.js`), by domain name and port, as it lists DNS
-  seeds. A seed serves WebTransport with a certificate for its domain,
-  which the browser checks as for any site. The page asks a seed for the
-  nodes it knows, and leaves it.
-- **Nodes.** A full node with `--wt-port` serves WebTransport with its own
-  certificate, which a page pins by hash, so it needs no domain. It tells
-  its peers its address, port and certificate hashes in `wtaddr`, and
-  answers `getwtaddr` with the nodes it has heard of. The certificate
-  lasts 13 days: the node announces the next one ahead, so a page that
-  knows the node keeps up.
-- **Memory.** The page keeps the nodes it learned (in localStorage), and on
-  the next visit dials them first, with no seed.
+- **A web wallet** that trusts no server with its keys or addresses. bcash
+  ships one, in `browser/`. It is live at <https://webnode.badger.cash>.
+- **Your own pages** built on bcash's SPV node, using `browser/bcash-spv.js`.
+
+This guide covers how it works, how to run a node that pages can connect to,
+and how to build and host the wallet.
+
+## How it works
+
+Browsers can't open raw TCP connections, so a page can't speak the normal
+peer-to-peer protocol. Browsers do support **WebTransport**, a fast,
+encrypted connection over HTTP/3 (UDP). A bcash full node started with
+`--wt-port` serves the usual P2P protocol over WebTransport as well as TCP,
+and the page connects to it with that.
+
+### Finding nodes
+
+A page has to find nodes without a server telling it where they are. It does
+this in three ways:
+
+1. **Seeds.** Each network has a short list of WebTransport seeds in
+   `lib/protocol/networks.js` (`wtSeeds`), much like DNS seeds for TCP nodes.
+   A seed is a node with a domain name and a normal certificate for it, such
+   as one from Let's Encrypt, so the browser can check it like any website.
+   The page asks a seed which nodes it knows about, then disconnects.
+
+   | Network | Seed |
+   |---|---|
+   | Mainnet | `ecash.badger.cash:8336` |
+   | Testnet | `webnode.badger.cash:18336` |
+
+2. **Nodes.** Ordinary WebTransport nodes don't need a domain. Each one makes
+   its own self-signed certificate, and the page trusts it by its hash
+   (*certificate pinning*). Nodes share their address, port and certificate
+   hashes with each other in `wtaddr` messages, and answer `getwtaddr` with
+   the nodes they know, so a seed can pass them on to pages.
+
+   Browsers accept a pinned certificate only if it lasts 14 days or less, so
+   the node makes a new one every 13 days. It announces the next certificate
+   before switching, so pages that already know the node keep working.
+
+3. **Memory.** The page stores the nodes it has learned in `localStorage`.
+   On the next visit it dials them directly and doesn't need a seed.
+
+### Where the chain starts
+
+A page doesn't download the whole chain. It starts at the newest checkpoint
+built into bcash and downloads block headers from there. That is a few
+thousand headers on testnet and tens of thousands on mainnet. It happens
+once per browser, because the page keeps its chain in IndexedDB.
+
+Starting from a checkpoint is what makes the page trustworthy. The page
+knows that block in advance, and checks every header after it against the
+one before. A page can't safely start from "the tip", because a peer could
+hand it a fake one.
 
 ## Running a node for pages
 
-A node for pages needs the optional dependency
-`@fails-components/webtransport`, and a UDP port open:
+A node that pages can use needs three things:
+
+- **The WebTransport library.** This is the optional dependency
+  `@fails-components/webtransport`, which `yarn install` adds wherever a
+  build for your platform exists. x86-64 and ARM64 Linux both work.
+- **Bloom filters** turned on (`--bip37`), because pages sync as SPV clients.
+- **An open UDP port** in the firewall. WebTransport runs over UDP, so a TCP
+  rule isn't enough.
 
 ```
-$ bcash --wt-port=18335 --wt-host=203.0.113.7 --bip37
+bcash --bip37 --wt-port=18335 --wt-host=203.0.113.7
 ```
 
-A seed also has a domain and a certificate for it, as from Let's Encrypt,
-on a second UDP port:
+`--wt-host` must be the public IP address that pages will dial. The
+certificate is issued for it.
+
+### Running a seed
+
+A seed is a WebTransport node that also has a domain name and a certificate
+for it, served on a second UDP port:
 
 ```
-$ bcash --wt-port=18335 --wt-host=203.0.113.7 --bip37 \
+bcash --bip37 --wt-port=18335 --wt-host=203.0.113.7 \
   --wt-seed-port=18336 \
   --wt-seed-cert=/path/to/fullchain.pem \
   --wt-seed-key=/path/to/privkey.pem
 ```
 
-See [Configuration](Configuration.md).
+The node checks the certificate files every hour and reloads them when they
+change, so renewing the certificate doesn't need a restart. With certbot, a
+deploy hook can copy the renewed files to where the node can read them, for
+example `/etc/letsencrypt/renewal-hooks/deploy/bcash-wt-seed`:
 
-## The wallet
+```sh
+#!/bin/sh
+set -eu
+SRC=/etc/letsencrypt/live/seed.example.com
+DST=/var/lib/bcash/wt-seed
+install -o bcash -g bcash -m 600 "$SRC/fullchain.pem" "$DST/fullchain.pem"
+install -o bcash -g bcash -m 600 "$SRC/privkey.pem" "$DST/privkey.pem"
+```
+
+To make your seed a default for everyone, add it to `wtSeeds` for its
+network in `lib/protocol/networks.js`.
+
+### Connection limits
+
+Pages get their own inbound slots, separate from TCP peers, so a busy TCP
+node never turns pages away:
+
+| Option | Default | Limits |
+|---|---|---|
+| `max-inbound` | 8 | inbound TCP peers |
+| `wt-max-inbound` | 64 | inbound WebTransport peers (pages) |
+
+See [Configuration](Configuration.md) for every WebTransport option.
+
+## The web wallet
+
+### Building
 
 ```
-$ yarn install
-$ yarn build-browser
+yarn install
+yarn build-browser
 ```
 
-This builds `browser/bcash-wallet.js`, the web wallet that
-`browser/index.html` loads (about 400 KB gzipped; it reads English
-recovery phrases, and uses the browser's own Unicode normalization),
-`browser/bcash-scan.js`, its QR code reader, loaded the first time a code
-is scanned, and `browser/bcash-spv.js`, the SPV node alone, a script
-exposing `bcash`, for pages of your own (every BIP39 language). Each is
-also written compressed beside it, `.br` (Brotli) and `.gz`. Serve
-`index.html`, `bcash-wallet.js` and `bcash-scan.js` from any static web
-server over HTTPS (browsers offer WebTransport only to secure pages): one
-that sends stored compressed files (nginx's `brotli_static` and
-`gzip_static`, Caddy's `precompressed`) sends about 310 KB for the wallet;
-most hosts and CDNs compress on their own; with none, it is the plain
-1.5 MB, slower to load, the same wallet. The network menu beside the name
-switches between mainnet and testnet in place; `?network=` picks the first
-(mainnet by default).
+This writes three bundles to `browser/`, each with a Brotli (`.br`) and a
+gzip (`.gz`) copy beside it:
 
-The wallet (`browser/app.js`, on `browser/wallet/`):
+| File | What it is | Size with Brotli |
+|---|---|---|
+| `bcash-wallet.js` | The web wallet that `index.html` loads | about 310 KB |
+| `bcash-scan.js` | The QR code reader, loaded the first time you scan | about 27 KB |
+| `bcash-spv.js` | The SPV node on its own, for your own pages | about 275 KB |
 
-- **Keys**, each with a name: new recovery phrases (BIP39, 12 words; the one
-  address at Cashtab's path, m/44'/1899'/0'/0/0, so a Cashtab phrase opens
-  the same address) or WIF keys, and imports of either. A key belongs to no
-  network: it is an ecash: address on mainnet and an ectest: one on
-  testnet. Each keeps when it was made, and the block it was born at on
-  each network: its scan there starts at that block, or, on a network it
-  is new to, at the block made when it was.
-- **Encrypted** with a password in the browser (PBKDF2 and AES-GCM), keys
-  and the coins and history alike. Secrets show only with the password
-  again.
-- **The wallet file**: every key, phrase and birth height, encrypted with
-  the password. Imported in another browser, it restores the wallet with a
-  fast sync.
-- **eTokens**: SLP Token Types 1 and 2, added by their genesis (its txid,
-  the token id, and the height of its block, which the wallet checks it
-  is in). A token seen in a coin is added on its own: its genesis's
-  height is asked of Chronik (the explorers' indexer) as a hint, and the
-  wallet checks the genesis in that block from its own peers, so a wrong
-  answer costs a failed check, not trust. Without an answer, a token is
-  added by hand. Each token coin is checked as bcash's SLP indexer checks it,
-  walking back through its parents to the genesis, those unconfirmed
-  fetched from peers' mempools, so tokens, as XEC, can be spent unconfirmed.
-  Sending a token spends only its own checked coins.
-- **Coins** as peers relay them, then confirmed in blocks; history; sending
-  XEC at 1 sat a byte, to an address typed, pasted or scanned from a QR code
-  with the camera (an amount in it, `?amount=12.34`, fills in too). A coin from a transaction carrying SLP is kept apart
-  and never spent as XEC, so a payment cannot burn a token.
-- Its chain starts at the newest checkpoint built in. What an imported key
-  held before that, or a token's history from before it, is still found:
-  the blocks below are scanned by their hashes, proven by headers fetched
-  between the checkpoints built into bcash, each building on the one
-  before, the last the next checkpoint (`browser/wallet/history.js`). An
-  imported key scans from the block it was made at; one whose block is not
-  known scans from the newest checkpoint, and from an earlier block on
-  request (Keys, Scan earlier).
+The wallet bundle includes only the English BIP39 word list. `bcash-spv.js`
+includes every language.
 
-In a page of your own:
+### Hosting
 
-``` js
+Copy `index.html`, `bcash-wallet.js` and `bcash-scan.js`, with their `.br`
+and `.gz` copies, to any static web server. It must serve the page over
+**HTTPS**, because browsers allow WebTransport only on secure pages.
+
+No special server is required:
+
+- A server that sends the stored compressed files delivers about 310 KB.
+  For nginx, turn on `brotli_static` and `gzip_static`; for Caddy, use
+  `precompressed`.
+- Most hosts and CDNs compress files on their own, with much the same
+  result.
+- With no compression at all, the wallet is 1.5 MB. It loads more slowly
+  but works the same.
+
+The page opens on mainnet. The network menu beside the name switches to
+testnet and back without reloading the page, and `?network=testnet` in the
+URL opens it on testnet.
+
+### What the wallet does
+
+**Keys.** Make a new 12-word recovery phrase, or import a phrase or a WIF
+private key. A phrase gives one address, at Cashtab's path
+(`m/44'/1899'/0'/0/0`), so a Cashtab phrase opens the same address here. A
+key works on every network: it is an `ecash:` address on mainnet and an
+`ectest:` address on testnet.
+
+**Encryption.** Keys, coins and history are encrypted in the browser with
+your password (PBKDF2 and AES-GCM). Showing a phrase or private key asks for
+the password again. The password can't be recovered, so back up your phrase
+or wallet file.
+
+**The wallet file.** Export every key and phrase, encrypted with your
+password, to restore the wallet in another browser. The file records the
+block each key was made at, so a restored wallet scans only from there and
+syncs quickly.
+
+**Receiving and sending XEC.** Payments show up as soon as peers relay them,
+then confirm in blocks. You can spend coins before they confirm. Send to an
+address that you type, paste, or scan from a QR code with the camera. If the
+code includes an amount (`?amount=12.34`), it's filled in too. The fee is 1
+satoshi per byte.
+
+**eTokens (SLP Types 1 and 2).** The wallet checks every token coin itself
+before you can spend it. It walks back through the coin's history, fetching
+any unconfirmed parents from peers' mempools, until it reaches a point it can
+trust:
+
+- the token's genesis transaction, for coins from its initial supply;
+- for Type 1, a MINT whose baton traces back to the genesis;
+- for Type 2, a MINT drawing on the token's vault.
+
+Until that check passes, a newly received token coin is locked. Unconfirmed
+coins descended from coins that already passed aren't locked, so tokens can
+be spent unconfirmed, just like XEC.
+
+A token you receive is added on its own. To find its genesis transaction,
+the wallet asks Chronik (the explorers' indexer) which block it's in, then
+fetches that block from its own peers and checks it there. Chronik's answer
+is only a hint: a wrong answer makes the check fail, but it can't make the
+wallet trust anything. If Chronik can't be reached, add the token by hand,
+with its token ID and the height of its genesis block.
+
+Coins in transactions that carry SLP data are kept apart and never spent as
+plain XEC, so a payment can't accidentally burn a token.
+
+**History from before the checkpoint.** An imported key may hold coins from
+before the checkpoint where the page's chain starts. The wallet still finds
+them. It fetches the headers between the checkpoints built into bcash, checks
+that they link up, and scans those blocks by their hashes
+(`browser/wallet/history.js`). An imported key scans from the block it was
+made at. If you don't know that block, it scans from the newest checkpoint,
+and **Keys → Scan earlier** reaches further back.
+
+The wallet's code is in `browser/app.js` (the interface) and
+`browser/wallet/` (keys, coins, tokens, sending and history).
+
+## Using the SPV node in your own page
+
+Load `bcash-spv.js`, which exposes `bcash`, and start a node with the
+browser's own `WebTransport`:
+
+```js
 const node = new bcash.SPVNode({
-  network: 'testnet',
+  network: 'main',
   prefix: '/bcash',
   memory: false,
   workers: false,
   webTransport: WebTransport,
-  wtStore: bcash.localStore('bcash-wthosts-testnet')
+  wtStore: bcash.localStore('bcash-wthosts-main')
 });
 ```
 
-`wtSeeds` overrides the network's seeds: `"host:port"` for a seed by
-domain, or `{host, port, hashes}` for a node by its certificate hashes.
+- `prefix` names the IndexedDB database the chain is kept in, and
+  `memory: false` keeps it between visits.
+- `wtStore` is where the node remembers the WebTransport nodes it learns.
+- `wtSeeds` replaces the network's seeds. Each entry is either
+  `"host:port"`, for a seed reached by its domain, or `{host, port, hashes}`,
+  for a node reached by its certificate hashes.
