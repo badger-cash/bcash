@@ -4,5 +4,6 @@ docker_data/
 browser/bcoin*
 browser/bcash-spv.js
 browser/bcash-wallet.js
+browser/bcash-scan.js
 npm-debug.log
 coverage/

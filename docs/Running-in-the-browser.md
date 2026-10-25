@@ -50,10 +50,14 @@ $ yarn build-browser
 ```
 
 This builds `browser/bcash-wallet.js`, the web wallet that
-`browser/index.html` loads, and `browser/bcash-spv.js`, the SPV node alone,
-a script exposing `bcash`, for pages of your own. Serve `index.html` and
-`bcash-wallet.js` from any static web server, over HTTPS (browsers offer
-WebTransport only to secure pages). The network menu beside the name
+`browser/index.html` loads (about 400 KB gzipped; it reads English
+recovery phrases, and uses the browser's own Unicode normalization),
+`browser/bcash-scan.js`, its QR code reader, loaded the first time a code
+is scanned, and `browser/bcash-spv.js`, the SPV node alone, a script
+exposing `bcash`, for pages of your own (every BIP39 language). Serve
+`index.html`, `bcash-wallet.js` and `bcash-scan.js` from any static web
+server, compressed, over HTTPS (browsers offer WebTransport only to secure
+pages). The network menu beside the name
 switches between mainnet and testnet in place; `?network=` picks the first
 (testnet by default).
 

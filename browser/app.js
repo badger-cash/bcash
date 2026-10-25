@@ -19,7 +19,6 @@
  */
 
 const qrcode = require('qrcode-generator');
-const jsQR = require('jsqr');
 const bcash = require('./spv');
 const {Vault} = require('./wallet/vault');
 const {Coins} = require('./wallet/coins');
@@ -88,7 +87,27 @@ const download = (name, text) => {
  * @returns {Promise} the code's text, or null if closed.
  */
 
-function scanCode() {
+// The QR code reader: its own script, fetched the first time it is used.
+let reader = null;
+
+function loadReader() {
+  if (!reader) {
+    reader = new Promise((resolve, reject) => {
+      const script = el('script', {src: 'bcash-scan.js'});
+      script.onload = () => resolve(globalThis.bcashScan);
+      script.onerror = () => {
+        reader = null;
+        reject(new Error('Could not load the QR code reader.'));
+      };
+      document.head.append(script);
+    });
+  }
+  return reader;
+}
+
+async function scanCode() {
+  const jsQR = await loadReader();
+
   return new Promise((resolve) => {
     const video = el('video', {playsinline: true, muted: true});
     const status = el('p', {class: 'muted small'}, 'Starting the camera...');

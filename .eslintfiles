@@ -7,8 +7,10 @@ browser/app.js
 browser/build.js
 browser/empty.js
 browser/os.js
+browser/scan.js
 browser/spv.js
 browser/wallet/
+browser/wordlist-english.js
 lib/
 migrate/
 scripts/

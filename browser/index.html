@@ -543,10 +543,82 @@
       .log .err {
         color: var(--err);
       }
+      /* Shown while the wallet's script loads; the wallet replaces it. */
+      .splash {
+        min-height: 80vh;
+        display: grid;
+        place-items: center;
+        align-content: center;
+        gap: 18px;
+        animation: splash-in 0.4s ease-out both;
+      }
+      .splash-mark {
+        font-size: 2.6em;
+        font-weight: 700;
+        letter-spacing: -0.02em;
+        background: linear-gradient(90deg, var(--fg) 0%, var(--fg) 40%,
+          var(--accent) 50%, var(--fg) 60%, var(--fg) 100%);
+        background-size: 250% 100%;
+        -webkit-background-clip: text;
+        background-clip: text;
+        color: transparent;
+        animation: splash-shine 2s linear infinite;
+      }
+      .splash-bar {
+        position: relative;
+        width: 120px;
+        height: 3px;
+        border-radius: 3px;
+        overflow: hidden;
+        background: var(--line);
+      }
+      .splash-bar::after {
+        content: "";
+        position: absolute;
+        inset: 0;
+        width: 40%;
+        border-radius: 3px;
+        background: var(--accent);
+        animation: splash-slide 1.2s ease-in-out infinite;
+      }
+      @keyframes splash-in {
+        from {
+          opacity: 0;
+          transform: translateY(6px);
+        }
+      }
+      @keyframes splash-shine {
+        from {
+          background-position: 100% 0;
+        }
+        to {
+          background-position: -150% 0;
+        }
+      }
+      @keyframes splash-slide {
+        from {
+          transform: translateX(-100%);
+        }
+        to {
+          transform: translateX(250%);
+        }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .splash, .splash-mark, .splash-bar::after {
+          animation-duration: 0s;
+          animation-iteration-count: 1;
+        }
+      }
     </style>
   </head>
   <body>
-    <div id="app"></div>
+    <div id="app">
+      <div class="splash" role="status" aria-label="Loading bcash">
+        <div class="splash-mark">bcash</div>
+        <div class="splash-bar"></div>
+        <noscript>The bcash wallet needs JavaScript.</noscript>
+      </div>
+    </div>
     <script src="bcash-wallet.js"></script>
   </body>
 </html>
