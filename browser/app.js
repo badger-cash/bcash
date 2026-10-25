@@ -208,7 +208,7 @@ const ui = {
 };
 
 const asked = new URLSearchParams(location.search).get('network');
-let network = NETWORKS.some(n => n.id === asked) ? asked : 'testnet';
+let network = NETWORKS.some(n => n.id === asked) ? asked : 'main';
 let anchor = bcash.newestCheckpoint(network);
 let node = null;
 let coins = null;

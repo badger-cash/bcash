@@ -63,7 +63,7 @@ that sends stored compressed files (nginx's `brotli_static` and
 most hosts and CDNs compress on their own; with none, it is the plain
 1.5 MB, slower to load, the same wallet. The network menu beside the name
 switches between mainnet and testnet in place; `?network=` picks the first
-(testnet by default).
+(mainnet by default).
 
 The wallet (`browser/app.js`, on `browser/wallet/`):
 
