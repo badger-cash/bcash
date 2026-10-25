@@ -882,6 +882,7 @@ function main() {
       el('div', {class: 'amount'}, xec(bal.total),
         el('span', {}, ` ${ticker}`)),
       el('div', {class: 'muted small'}, [
+        scanProgress() ? 'incomplete: history being scanned' : null,
         bal.unconfirmed ? `${xec(bal.unconfirmed)} unconfirmed` : null,
         bal.immature ? `${xec(bal.immature)} maturing` : null,
         bal.locked ? `${xec(bal.locked)} in token coins, kept apart` : null
@@ -926,8 +927,13 @@ function syncState() {
   if (peers === 0)
     return {text: 'Connecting', cls: 'wait', best};
   // The chain's own flag goes by the tip's time: at the peers' height too.
-  if (chain.synced && chain.height >= best)
+  if (chain.synced && chain.height >= best) {
+    // The chain at the tip, its history still scanned for coins.
+    const scan = scanProgress();
+    if (scan)
+      return {text: `Scanning ${scan.pct.toFixed(0)}%`, cls: 'wait', best};
     return {text: `Synced ${num(chain.height)}`, cls: 'ok', best};
+  }
 
   const span = best - anchor.height;
   const pct = span > 0 ? (chain.height - anchor.height) / span * 100 : 0;
@@ -942,15 +948,31 @@ function syncChip() {
   }}, text);
 }
 
-function scanBar() {
+// The share of a coin scan done, or null with none running.
+function scanProgress() {
   const scans = [...ui.scans.values()];
   if (scans.length === 0)
     return null;
   const {start, end, height} = scans[0];
   const pct = end > start ? (height - start + 1) / (end - start + 1) * 100 : 0;
+  return {start, end, pct: Math.max(0, pct)};
+}
+
+function scanBar() {
+  const scan = scanProgress();
+  if (!scan)
+    return null;
+  const {start, end, pct} = scan;
+  if (coins && coins.rebuilding) {
+    return el('p', {class: 'notice'},
+      'Rebuilding this wallet\'s coin history, once: a fix to how spends'
+      + ' are counted needs each key\'s history scanned again. Blocks'
+      + ` ${num(start)} to ${num(end)}: ${pct.toFixed(0)}%. Keys and`
+      + ' tokens are kept; the balance fills in as it goes.');
+  }
   return el('p', {class: 'notice'},
     `Scanning blocks ${num(start)} to ${num(end)} for coins:`
-    + ` ${pct.toFixed(0)}%`);
+    + ` ${pct.toFixed(0)}%. The balance fills in as it goes.`);
 }
 
 const unavailable = () => el('div', {class: 'empty'},
@@ -1513,8 +1535,12 @@ function nodeTab() {
   const headers = pool.checkpoints && tail && tip && tail.height < tip.height;
 
   let state = 'downloading blocks';
+  const scan = scanProgress();
   if (headers)
     state = `headers to checkpoint ${num(tip.height)}: ${num(tail.height)}`;
+  else if (chain.synced && scan)
+    state = 'synced to the tip; scanning history for coins,'
+      + ` ${scan.pct.toFixed(0)}%`;
   else if (chain.synced)
     state = 'synced';
 

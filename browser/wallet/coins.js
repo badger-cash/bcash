@@ -127,7 +127,8 @@ class Coins extends EventEmitter {
       this.state.txs = {};
       this.state.spends = {};
       this.state.covered = {};
-      this.rebuilding = true;
+      // Kept with the state: a reload in the middle goes on with it.
+      this.state.rebuilding = true;
     }
 
     const fresh = this.state.synced == null;
@@ -170,7 +171,18 @@ class Coins extends EventEmitter {
       return;
 
     this.state.covered[key.address] = true;
+    if (this.uncovered().length === 0)
+      this.state.rebuilding = false;
     this.save();
+  }
+
+  /**
+   * Whether the coins are being rebuilt, once, from a scan of each key's
+   * history (a state kept before spends were taken in any order).
+   */
+
+  get rebuilding() {
+    return Boolean(this.state && this.state.rebuilding);
   }
 
   /**
