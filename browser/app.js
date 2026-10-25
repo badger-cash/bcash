@@ -963,16 +963,18 @@ function scanBar() {
   if (!scan)
     return null;
   const {start, end, pct} = scan;
+  const blocks = `Blocks ${num(start)} to ${num(end)}; the balance fills`
+    + ' in as it goes.';
+
+  // One line; what it is, in full, on hover or a long press.
   if (coins && coins.rebuilding) {
-    return el('p', {class: 'notice'},
-      'Rebuilding this wallet\'s coin history, once: a fix to how spends'
-      + ' are counted needs each key\'s history scanned again. Blocks'
-      + ` ${num(start)} to ${num(end)}: ${pct.toFixed(0)}%. Keys and`
-      + ' tokens are kept; the balance fills in as it goes.');
+    return el('p', {class: 'notice one-line-notice', title: 'A fix to how'
+      + ' spends are counted needs each key\'s history scanned again,'
+      + ` once. Keys and tokens are kept. ${blocks}`},
+    `Rebuilding coin history, once · ${pct.toFixed(0)}%`);
   }
-  return el('p', {class: 'notice'},
-    `Scanning blocks ${num(start)} to ${num(end)} for coins:`
-    + ` ${pct.toFixed(0)}%. The balance fills in as it goes.`);
+  return el('p', {class: 'notice one-line-notice', title: blocks},
+    `Scanning history for coins · ${pct.toFixed(0)}%`);
 }
 
 const unavailable = () => el('div', {class: 'empty'},
