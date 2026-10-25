@@ -25,7 +25,10 @@
  *
  * A token is added by its genesis txid (the token id) and the height of
  * the block it is in: that block is fetched, the genesis is in it (its
- * merkle proof checks), and its ticker, name and decimals are read.
+ * merkle proof checks), and its ticker, name and decimals are read. A
+ * token seen in a coin is added so, its height asked of a hint (heightOf,
+ * as an indexer's word): a wrong one only fails the check, and without
+ * one, the token waits to be added by hand.
  *
  * Parents are found by scanning blocks down from the child toward the
  * genesis's height, a filter holding the txids still wanted, and those
@@ -103,6 +106,36 @@ function read(tx) {
   };
 }
 
+/**
+ * What an output of a transaction carrying SLP holds: tokens if its SLP
+ * data gives it some, or the mint baton; else none, plain XEC (change,
+ * and outputs given 0). Read as no token type it knows, it may still hold
+ * tokens: kept apart, to be safe.
+ * @param {Object|null} record - read(tx).
+ * @param {Number} vout
+ * @returns {Object} {token (kept apart), slp ({tokenId, amount, baton} or
+ *   null)}
+ */
+
+function holding(record, vout) {
+  if (vout === 0)
+    return {token: false, slp: null};
+
+  if (!record || !record.tokenId)
+    return {token: true, slp: null};
+
+  const amount = record.amounts[vout] || 0n;
+  const baton = record.baton === vout;
+
+  if (amount === 0n && !baton)
+    return {token: false, slp: null};
+
+  return {
+    token: true,
+    slp: {tokenId: record.tokenId, amount: String(amount), baton}
+  };
+}
+
 const sum = values => values.reduce((a, b) => a + b, 0n);
 
 class Tokens extends EventEmitter {
@@ -110,13 +143,18 @@ class Tokens extends EventEmitter {
    * @param {Object} options
    * @param {Coins} options.coins - whose state keeps the tokens' too.
    * @param {SPVNode} options.node
+   * @param {Function} [options.heightOf] - async (txid) => a block height
+   * or null: where to look for a genesis, a hint.
    */
 
-  constructor({coins, node}) {
+  constructor({coins, node, heightOf = null}) {
     super();
     this.coins = coins;
     this.node = node;
+    this.heightOf = heightOf;
     this.checking = null;
+    // Tokens asked of the hint this session, and what came of it.
+    this.lookups = new Map();
   }
 
   get state() {
@@ -227,6 +265,53 @@ class Tokens extends EventEmitter {
   }
 
   /**
+   * What each transaction moved of each token, for a key: from its token
+   * coins, those it received and those it spent.
+   * @returns {Map} txid -> [{tokenId, token, net (BigInt), status}]
+   */
+
+  movements(address) {
+    const byTX = new Map();
+    const add = (txid, coin, sign) => {
+      if (!coin.slp || !coin.slp.tokenId)
+        return;
+      if (!byTX.has(txid))
+        byTX.set(txid, new Map());
+      const tokens = byTX.get(txid);
+      const {tokenId} = coin.slp;
+      const entry = tokens.get(tokenId) || {tokenId, net: 0n};
+      entry.net += sign * BigInt(coin.slp.amount);
+      tokens.set(tokenId, entry);
+    };
+
+    for (const coin of Object.values(this.coins.state.coins)) {
+      if (coin.address !== address)
+        continue;
+      add(coin.txid, coin, 1n);
+      if (coin.spent)
+        add(coin.spent, coin, -1n);
+    }
+
+    const result = new Map();
+    for (const [txid, tokens] of byTX) {
+      result.set(txid, [...tokens.values()].map((entry) => {
+        const token = this.get(entry.tokenId);
+        const valid = this.state.slpValid[txid];
+        let status = 'pending';
+        if (!token)
+          status = 'unknown';
+        else if (valid === true)
+          status = 'valid';
+        else if (valid === false)
+          status = 'invalid';
+        return {...entry, token, status};
+      }));
+    }
+
+    return result;
+  }
+
+  /**
    * A token coin's standing: valid, pending, invalid, or unknown (its
    * token not added).
    */
@@ -282,6 +367,7 @@ class Tokens extends EventEmitter {
 
   async checkPending() {
     await this.backfill();
+    await this.discover();
 
     const txids = new Set();
     for (const coin of Object.values(this.coins.state.coins)) {
@@ -334,16 +420,65 @@ class Tokens extends EventEmitter {
       for (const coin of Object.values(this.coins.state.coins)) {
         if (coin.txid !== txid)
           continue;
-        coin.slp = record && record.tokenId && coin.vout > 0 ? {
-          tokenId: record.tokenId,
-          amount: String(record.amounts[coin.vout] || 0n),
-          baton: record.baton === coin.vout
-        } : null;
+        const held = holding(record, coin.vout);
+        coin.token = held.token;
+        coin.slp = held.slp;
       }
     }
 
     this.coins.save();
     this.emit('change');
+  }
+
+  /**
+   * Tokens seen in coins but not added: each added from its genesis,
+   * where the hint says it is. Once a session each.
+   */
+
+  async discover() {
+    if (!this.heightOf)
+      return;
+
+    const seen = new Set();
+    for (const coin of Object.values(this.coins.state.coins)) {
+      if (coin.token && !coin.spent && coin.slp && coin.slp.tokenId
+          && !this.get(coin.slp.tokenId)) {
+        seen.add(coin.slp.tokenId);
+      }
+    }
+
+    for (const tokenId of seen) {
+      let lookup = this.lookups.get(tokenId);
+
+      if (!lookup) {
+        lookup = {state: 'looking', height: null};
+        this.lookups.set(tokenId, lookup);
+        this.emit('change');
+
+        try {
+          lookup.height = await this.heightOf(tokenId);
+        } catch (e) {
+          lookup.height = null;
+        }
+
+        lookup.state = lookup.height == null ? 'not found' : 'found';
+        this.emit('change');
+      }
+
+      // Asked once; added once the chain has that block.
+      if (lookup.state !== 'found'
+          || lookup.height > this.node.chain.height) {
+        continue;
+      }
+
+      try {
+        await this.add(tokenId, lookup.height);
+        lookup.state = 'added';
+      } catch (e) {
+        lookup.state = `not added: ${e.message}`;
+      }
+      this.emit('change');
+    }
   }
 
   /**
@@ -698,3 +833,4 @@ class Tokens extends EventEmitter {
 
 exports.Tokens = Tokens;
 exports.read = read;
+exports.holding = holding;

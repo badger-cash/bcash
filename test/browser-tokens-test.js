@@ -261,6 +261,23 @@ describe('Web wallet tokens', function() {
       assert.strictEqual(balance(b.address).valid, 7n);
       assert.strictEqual(balance(a.address).valid, 8n);
 
+      // Its XEC change is plain XEC, spendable at once; its token change
+      // is kept apart.
+      const outs = coins.unspent(a.address).filter(c => c.txid
+        === pay.tx.txid());
+      const xecChange = outs.find(c => c.vout === pay.tx.outputs.length - 1);
+      assert(xecChange && !xecChange.token);
+      assert(coins.spendable(a.address).includes(xecChange));
+      assert(outs.find(c => c.vout === 2).token);
+
+      // In each key's history: what the payment moved of the token.
+      const moved = (address, txid) => tokens.movements(address).get(txid)
+        .map(m => [m.tokenId, m.net]);
+      assert.deepStrictEqual(moved(a.address, pay.tx.txid()),
+        [[g1.txid(), -7n]]);
+      assert.deepStrictEqual(moved(b.address, pay.tx.txid()),
+        [[g1.txid(), 7n]]);
+
       // Mined: all still so.
       await mine();
       await until(() => coinsOf(b.address)[0].height !== -1, 'B confirmed');
@@ -293,7 +310,12 @@ describe('Web wallet tokens', function() {
         && coinsOf(a.address).some(c => c.txid === noVault.txid()),
       'mints');
 
-      const vlt = await tokens.add(g2.txid(), g2Height);
+      // Not added by hand: seen in its coins, found where a hint says.
+      assert(!tokens.get(g2.txid()));
+      tokens.heightOf = async txid => (txid === g2.txid() ? g2Height : null);
+      await tokens.checkAll();
+      const vlt = tokens.get(g2.txid());
+      assert(vlt, 'not discovered');
       assert.strictEqual(vlt.version, 2);
       assert.strictEqual(vlt.vault, VAULT_HASH.toString('hex'));
       await tokens.checkAll();

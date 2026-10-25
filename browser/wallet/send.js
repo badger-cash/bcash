@@ -62,10 +62,9 @@ function parsePaymentURI(text, network) {
   let value = null;
   const amount = new URLSearchParams(query).get('amount');
   if (amount != null) {
-    const m = /^(\d{1,12})(?:\.(\d{1,2}))?$/.exec(amount.trim());
-    if (!m)
+    value = toSats(amount);
+    if (value == null)
       throw new Error('The code\'s amount is not one this wallet reads.');
-    value = Number(m[1]) * 100 + Number((m[2] || '').padEnd(2, '0'));
   }
 
   return {address, value};
@@ -151,10 +150,25 @@ const toCoin = c => Coin.fromOptions({
  */
 
 function toBase(text, decimals) {
-  const m = /^\s*(\d{1,19})(?:\.(\d+))?\s*$/.exec(text);
-  if (!m || (m[2] || '').length > decimals)
+  // "0.05", ".05", "5" and "5." alike: some digit, few enough decimals.
+  const m = /^\s*(\d{0,19})(?:\.(\d*))?\s*$/.exec(text);
+  if (!m || (m[1] + (m[2] || '')).length === 0)
     return null;
-  return BigInt(m[1] + (m[2] || '').padEnd(decimals, '0'));
+  if ((m[2] || '').length > decimals)
+    return null;
+  return BigInt((m[1] || '0') + (m[2] || '').padEnd(decimals, '0'));
+}
+
+/**
+ * An amount of XEC as typed, in sats: 2 decimals.
+ * @returns {Number|null}
+ */
+
+function toSats(text) {
+  const base = toBase(text, 2);
+  if (base == null || base > BigInt(Number.MAX_SAFE_INTEGER))
+    return null;
+  return Number(base);
 }
 
 /**
@@ -290,6 +304,7 @@ exports.parsePaymentURI = parsePaymentURI;
 exports.buildPayment = buildPayment;
 exports.buildTokenPayment = buildTokenPayment;
 exports.toBase = toBase;
+exports.toSats = toSats;
 exports.fromBase = fromBase;
 exports.DUST = DUST;
 exports.sendPayment = sendPayment;

@@ -24,8 +24,9 @@ const bcash = require('./spv');
 const {Vault} = require('./wallet/vault');
 const {Coins} = require('./wallet/coins');
 const {Tokens} = require('./wallet/tokens');
+const {lookupHeight, CHRONIK} = require('./wallet/chronik');
 const {buildPayment, buildTokenPayment, sendPayment, parsePaymentURI,
-  toBase, fromBase} = require('./wallet/send');
+  toBase, toSats, fromBase} = require('./wallet/send');
 
 const NETWORKS = [
   {id: 'main', label: 'Mainnet', ticker: 'XEC'},
@@ -57,14 +58,6 @@ const xec = sats => (sats / 100).toLocaleString('en-US', {
   minimumFractionDigits: 2,
   maximumFractionDigits: 2
 });
-
-// "12.34" XEC as sats, or null.
-const toSats = (text) => {
-  const m = /^\s*(\d{1,12})(?:\.(\d{1,2}))?\s*$/.exec(text);
-  if (!m)
-    return null;
-  return Number(m[1]) * 100 + Number((m[2] || '').padEnd(2, '0'));
-};
 
 const short = (s, n = 8) => s.length > 2 * n + 3
   ? `${s.slice(0, n)}...${s.slice(-n)}` : s;
@@ -298,7 +291,14 @@ async function startNode() {
 
   // Tokens: their coins checked as they come, and pending ones again with
   // each block.
-  const tokenState = new Tokens({coins: tracked, node: started});
+  // Where a token's genesis is, asked of Chronik (the explorers'
+  // indexer) as a hint the wallet then checks in its own block.
+  const tokenState = new Tokens({
+    coins: tracked,
+    node: started,
+    heightOf: CHRONIK[network]
+      ? txid => lookupHeight(CHRONIK[network], txid) : null
+  });
   const recheck = () => tokenState.checkAll()
     .catch(err => log(`Token check: ${err.message}`, 'err'));
   tokenState.on('change', () => scheduleRender());
@@ -941,23 +941,51 @@ function walletTab(key) {
         : 'Still syncing: they appear as blocks arrive.'));
   }
 
+  const moved = tokens ? tokens.movements(key.address) : new Map();
+
   return el('ul', {class: 'history'}, ...history.map((tx) => {
-    const sent = tx.net < 0;
     const depth = tip - tx.height + 1;
     const status = tx.height === -1
       ? 'Unconfirmed'
       : `${num(depth)} confirmation${depth === 1 ? '' : 's'}`;
     const date = new Date(tx.time * 1000).toLocaleString();
+
+    // A known token moved: the row is its, the XEC beside it the dust.
+    const movement = (moved.get(tx.txid) || []).find(m => m.net !== 0n);
+    const known = movement && movement.token;
+    const sent = known ? movement.net < 0n : tx.net < 0;
+
+    let label = sent ? 'Sent' : 'Received';
+    let value = `${sent ? '' : '+'}${xec(tx.net)}`;
+    let detail = null;
+    const tags = [];
+
+    if (known) {
+      const {decimals} = movement.token;
+      const name = tokenName(movement.token);
+      label = `${sent ? 'Sent' : 'Received'} ${name}`;
+      value = `${sent ? '-' : '+'}${fromBase(sent ? -movement.net
+        : movement.net, decimals)} ${name}`;
+      detail = `${tx.net < 0 ? '' : '+'}${xec(tx.net)} ${ticker}`;
+      if (movement.status === 'invalid')
+        tags.push('invalid');
+      else if (movement.status === 'pending')
+        tags.push('checking');
+    } else if (tx.token) {
+      tags.push(movement ? 'unknown token' : 'token');
+    }
+
     return el('li', {},
       el('div', {class: `icon ${sent ? 'out' : 'in'}`}, sent ? '↑' : '↓'),
       el('div', {class: 'what'},
-        el('div', {}, sent ? 'Sent' : 'Received',
-          tx.token ? el('span', {class: 'tag'}, 'token') : null),
+        el('div', {}, label,
+          ...tags.map(t => el('span', {class: 'tag'}, t))),
         el('div', {class: 'muted small'}, `${date} · ${status}`),
         el('a', {class: 'small mono', href: explorer(tx.txid),
           target: '_blank', rel: 'noopener'}, short(tx.txid))),
-      el('div', {class: `value ${sent ? 'out' : 'in'}`},
-        `${sent ? '' : '+'}${xec(tx.net)}`));
+      el('div', {class: 'actions'},
+        el('div', {class: `value ${sent ? 'out' : 'in'}`}, value),
+        detail ? el('div', {class: 'muted small right'}, detail) : null));
   }));
 }
 
@@ -1068,9 +1096,11 @@ function sendTab(key, bal) {
  * eTokens
  */
 
-const tokenName = token => token
-  ? (token.ticker || token.name || short(token.tokenId, 6))
-  : 'unknown';
+function tokenName(token) {
+  if (!token)
+    return 'unknown';
+  return token.ticker || token.name || short(token.tokenId, 6);
+}
 
 function tokensTab(key) {
   if (!coins || !tokens)
@@ -1121,7 +1151,9 @@ function tokensTab(key) {
           ? short(entry.tokenId, 10) : 'a token type this wallet does not'
             + ' read'),
         el('div', {class: 'muted small'}, `${entry.coins} coin`
-          + `${entry.coins === 1 ? '' : 's'}, kept apart`)),
+          + `${entry.coins === 1 ? '' : 's'}, kept apart`),
+        entry.tokenId ? el('div', {class: 'muted small'},
+          lookupText(tokens.lookups.get(entry.tokenId))) : null),
       entry.tokenId ? el('div', {class: 'actions'},
         el('button', {onclick: () => {
           $('token-id').value = entry.tokenId;
@@ -1160,6 +1192,24 @@ function tokensTab(key) {
         $('token-height').value = '';
         ui.notice = `Added ${tokenName(token)}.`;
       })}, 'Add token')));
+}
+
+function lookupText(lookup) {
+  if (!lookup)
+    return 'Looking for its genesis...';
+  switch (lookup.state) {
+    case 'looking':
+      return 'Looking for its genesis...';
+    case 'found':
+      return `Its genesis is at block ${num(lookup.height)}: waiting for`
+        + ' the wallet to reach it.';
+    case 'not found':
+      return 'Not found automatically: add it by hand below.';
+    case 'added':
+      return 'Added.';
+    default:
+      return `${lookup.state[0].toUpperCase()}${lookup.state.slice(1)}`;
+  }
 }
 
 function tokenSendView(key) {

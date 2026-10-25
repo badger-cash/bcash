@@ -221,6 +221,20 @@ describe('Web wallet', function() {
       assert.strictEqual(storage.getItem('bcash-wallet-testnet'), null);
     });
 
+    it('should read amounts as typed', () => {
+      const {toBase, toSats} = require('../browser/wallet/send');
+      assert.strictEqual(toBase('.02', 2), 2n);
+      assert.strictEqual(toBase('0.02', 2), 2n);
+      assert.strictEqual(toBase('2.', 2), 200n);
+      assert.strictEqual(toBase(' 12.3 ', 2), 1230n);
+      assert.strictEqual(toBase('5', 0), 5n);
+      assert.strictEqual(toBase('1.234', 2), null);
+      assert.strictEqual(toBase('.', 2), null);
+      assert.strictEqual(toBase('', 2), null);
+      assert.strictEqual(toSats('.5'), 50);
+      assert.strictEqual(toSats('x'), null);
+    });
+
     it('should read a payment code', () => {
       const address = KeyRing.generate().getAddress();
       const full = address.toString('main');
@@ -230,10 +244,47 @@ describe('Web wallet', function() {
         {address: full, value: null});
       assert.deepStrictEqual(parsePaymentURI(`${full}?amount=12.3`, 'main'),
         {address: full, value: 1230});
+      assert.deepStrictEqual(parsePaymentURI(`${full}?amount=.5`, 'main'),
+        {address: full, value: 50});
       assert.throws(() => parsePaymentURI(`${full}?amount=1.234`, 'main'),
         /amount/);
       assert.throws(() => parsePaymentURI(address.toString('testnet'),
         'main'), /Not an address/);
+    });
+  });
+
+  describe('coins kept before', function() {
+    it('should take a token transaction\'s change as XEC', async () => {
+      const v = vault();
+      await v.create('correct horse');
+      await v.newKey('a', {network: 'regtest', height: 0});
+      const {address} = v.list('regtest')[0];
+
+      // As the first token wallet kept a token send's outputs: all apart,
+      // the change among them, given 0 tokens.
+      const coin = (vout, amount) => ({
+        txid: '11'.repeat(32), vout, value: 1000 * vout, script: '',
+        address, height: 5, coinbase: false, token: true, spent: null,
+        slp: {tokenId: '22'.repeat(32), amount, baton: false}
+      });
+      await v.saveState('regtest', {
+        coins: {a: coin(1, '5'), b: coin(2, '0')},
+        txs: {}, covered: {}, synced: 5
+      });
+
+      const node = {
+        network: {type: 'regtest'},
+        chain: {height: 5},
+        pool: {watch() {}},
+        on() {}
+      };
+      const coins = new Coins({vault: v, node});
+      await coins.open();
+
+      assert.strictEqual(coins.state.coins.a.token, true);
+      assert.strictEqual(coins.state.coins.b.token, false);
+      assert.deepStrictEqual(coins.spendable(address).map(c => c.vout), [2]);
+      assert.strictEqual(coins.balance(address).locked, 1000);
     });
   });
 

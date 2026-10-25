@@ -74,7 +74,11 @@ The wallet (`browser/app.js`, on `browser/wallet/`):
   fast sync.
 - **eTokens**: SLP Token Types 1 and 2, added by their genesis (its txid,
   the token id, and the height of its block, which the wallet checks it
-  is in). Each token coin is checked as bcash's SLP indexer checks it,
+  is in). A token seen in a coin is added on its own: its genesis's
+  height is asked of Chronik (the explorers' indexer) as a hint, and the
+  wallet checks the genesis in that block from its own peers, so a wrong
+  answer costs a failed check, not trust. Without an answer, a token is
+  added by hand. Each token coin is checked as bcash's SLP indexer checks it,
   walking back through its parents to the genesis, those unconfirmed
   fetched from peers' mempools, so tokens, as XEC, can be spent unconfirmed.
   Sending a token spends only its own checked coins.

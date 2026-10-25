@@ -17,8 +17,10 @@
  * a reload or for a key imported with a birth height, are scanned on
  * connections of their own (pool.scanRange), from that height to the tip.
  *
- * A coin from a transaction carrying SLP may carry tokens: it is kept
- * apart, never spent as XEC, so an XEC payment cannot burn a token.
+ * A coin carrying tokens, as its transaction's SLP data says (or of a
+ * token type not read, to be safe), is kept apart, never spent as XEC, so
+ * an XEC payment cannot burn a token. A token transaction's change, and
+ * an output it gives no tokens, is plain XEC.
  *
  * A key new to this network's state (added on another network, or here
  * while the node was behind) is scanned once from its birth there, and
@@ -32,7 +34,7 @@ const EventEmitter = require('events');
 const {BloomFilter} = require('bfilter');
 const Outpoint = require('../../lib/primitives/outpoint');
 const SLP = require('../../lib/script/slp');
-const {read} = require('./tokens');
+const {read, holding} = require('./tokens');
 const consensus = require('../../lib/protocol/consensus');
 
 class Coins extends EventEmitter {
@@ -68,6 +70,16 @@ class Coins extends EventEmitter {
 
     if (!this.state.covered)
       this.state.covered = {};
+
+    // Kept apart before outputs' tokens were read: a coin its token data
+    // gives none (a token transaction's change) is plain XEC.
+    for (const coin of Object.values(this.state.coins)) {
+      if (coin.token && coin.slp && BigInt(coin.slp.amount) === 0n
+          && !coin.slp.baton) {
+        coin.token = false;
+        coin.slp = null;
+      }
+    }
 
     const fresh = this.state.synced == null;
 
@@ -219,12 +231,15 @@ class Coins extends EventEmitter {
       && SLP.fromScript(tx.outputs[0].script).isValidSlp();
     // What each output says it holds; whether it does, wallet/tokens.js
     // decides.
-    const slp = token ? read(tx) : null;
+    const slpRecord = token ? read(tx) : null;
 
     tx.outputs.forEach((output, vout) => {
       const key = this.ours(output);
       if (!key)
         return;
+
+      const held = token ? holding(slpRecord, vout)
+        : {token: false, slp: null};
 
       this.state.coins[`${txid}:${vout}`] = {
         txid,
@@ -234,12 +249,8 @@ class Coins extends EventEmitter {
         address: key.address,
         height,
         coinbase: tx.isCoinbase(),
-        token: token && vout > 0,
-        slp: slp && slp.tokenId && vout > 0 ? {
-          tokenId: slp.tokenId,
-          amount: String(slp.amounts[vout] || 0n),
-          baton: slp.baton === vout
-        } : null,
+        token: held.token,
+        slp: held.slp,
         spent: null
       };
       touch(key.address).received += output.value;
