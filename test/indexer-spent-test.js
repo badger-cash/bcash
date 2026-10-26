@@ -128,6 +128,23 @@ describe('Indexer spenders', function() {
       {txid, input: 0, height});
     assert.strictEqual((await http(`/spent/${txid}/0`)).status, 404);
 
+    // A record is small: a 12-byte prefix of the txid and the index in
+    // its key, varints in its value.
+    const records = await node.txindex.db.range({
+      gte: layout.p.min(), lte: layout.p.max()
+    });
+    assert(records.length > 0);
+    for (const {key, value} of records) {
+      assert(key.length <= 16, `key of ${key.length} bytes`);
+      assert(value.length <= 16, `value of ${value.length} bytes`);
+    }
+
+    // Another output whose txid starts as the spent one's: the same key,
+    // but its spender is checked, so no wrong answer.
+    const lookalike = Buffer.from(parent.hash());
+    lookalike[31] ^= 0xff;
+    assert.strictEqual(await node.txindex.getSpender(lookalike, 0), null);
+
     // A coinbase spends nothing: no record for its null outpoint.
     const coinbase = (await node.chain.getBlock(
       await node.chain.getHash(height))).txs[0];
