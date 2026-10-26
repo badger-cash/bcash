@@ -73,7 +73,7 @@ Note that certain chain options affect the format and indexing of the chain data
 - `prune`: Prune from the last 288 blocks (default: false).
 - `checkpoints`: Use checkpoints and getheaders for the initial sync (default: true).
 - `coin-cache`: The size (in MB) of the in-memory UTXO cache. By default, there is no UTXO cache enabled. To get a good number of cache hits per block, the coin cache has to be fairly large (60-100mb recommended at least).
-- `index-tx`: Index transactions (enables transaction endpoints in REST api) (default: false).
+- `index-tx`: Index transactions (enables transaction endpoints in REST api) (default: false). It also records where each output was spent: a transaction's outputs carry `spentBy` (`{txid, input, height}`, with height -1 while the spend is in the mempool, or `null` if unspent), and `/spent/:hash/:index` returns the spender of one output. A transaction index made by an earlier version fills in its spenders once, in the background, on its first start.
 - `index-address`: Index transactions and utxos by address (default: false).
 
 ## Mempool Options
