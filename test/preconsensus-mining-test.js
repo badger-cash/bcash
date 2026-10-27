@@ -56,7 +56,7 @@ describe('Pre-consensus mining', function() {
     for (let i = 0; i < 103; i++) {
       const block = await miner.mineBlock(chain.tip, address);
       const entry = await chain.add(block);
-      if (i < 3)
+      if (i < 4)
         coins.push(Coin.fromTX(block.txs[0], 0, entry.height));
     }
 
@@ -146,6 +146,26 @@ describe('Pre-consensus mining', function() {
     await call('removetransaction', [tx.txid()]);
     assert(!mempool.hasEntry(tx.hash()));
     assert(!mempool.isAvalancheFinalized(tx.hash()));
+  });
+
+  it('should add a transaction to the template once finalized', async () => {
+    const template = async () => {
+      const json = await node.rpc.call({method: 'getblocktemplate',
+        params: [{rules: []}]}, {});
+      assert.strictEqual(json.error, null, JSON.stringify(json.error));
+      return json.result.transactions.map(t => t.txid);
+    };
+
+    // A template cached first, then a transaction within its 10 seconds.
+    await template();
+    const tx = spend(coins[3], 10000);
+    await mempool.addTX(tx);
+    assert(!(await template()).includes(tx.txid()));
+
+    // Finalized a moment later: the cached template must not hide it.
+    await pool.applyTxVote(tx, Processor.voteStatus.FINALIZED);
+    assert(mempool.isAvalancheFinalized(tx.hash()));
+    assert((await template()).includes(tx.txid()));
   });
 });
 
