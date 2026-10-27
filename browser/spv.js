@@ -27,17 +27,15 @@ exports.Script = require('../lib/script/script');
 exports.TX = require('../lib/primitives/tx');
 exports.MTX = require('../lib/primitives/mtx');
 // What a page's own transactions take beyond the wallet's: coins, outputs,
-// SLP scripts, and a BIP70 Payment to post one and the PaymentACK answering.
-// No PaymentRequest, so none of bip70's certificate code.
+// SLP scripts, and BIP70 whole: a PaymentRequest to pay, its certificate
+// chain to check where it came by a channel HTTPS does not authenticate, the
+// Payment and the PaymentACK answering it.
 exports.Coin = require('../lib/primitives/coin');
 exports.Outpoint = require('../lib/primitives/outpoint');
 exports.Output = require('../lib/primitives/output');
 exports.consensus = require('../lib/protocol/consensus');
 exports.script = {SLP: require('../lib/script/slp')};
-exports.bip70 = {
-  Payment: require('../lib/bip70/payment'),
-  PaymentACK: require('../lib/bip70/paymentack')
-};
+exports.bip70 = require('../lib/bip70');
 
 /**
  * The newest checkpoint built into bcash for a network, as an anchor for
