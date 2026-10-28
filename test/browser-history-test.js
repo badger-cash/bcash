@@ -11,7 +11,9 @@
  * imported key's payment and token coin from block 102, adds the token
  * from its genesis there, and checks the coin valid back to it: blocks
  * below the anchor scanned by hashes proven from the genesis to the
- * anchor. Needs the optional @fails-components/webtransport.
+ * anchor. A page that trusts the genesis' block, as its host names it,
+ * adds the token from that one block without fetching a header. Needs the
+ * optional @fails-components/webtransport.
  */
 
 const assert = require('bsert');
@@ -27,6 +29,7 @@ const KeyRing = require('../lib/primitives/keyring');
 const MTX = require('../lib/primitives/mtx');
 const Coin = require('../lib/primitives/coin');
 const Script = require('../lib/script/script');
+const {BloomFilter} = require('bfilter');
 
 class Storage {
   constructor() {
@@ -253,6 +256,45 @@ describe('Web wallet history', function() {
       assert.strictEqual(tokens.status(coin), 'valid');
       assert(coins.unspent(imported.address).some(c => c.txid
         === onward.txid()));
+
+      // A page that trusts the genesis' block, as its host names it: the
+      // token added from that one block, no header below the anchor
+      // fetched, and the coin still valid back to it.
+      const trusted = new History({node: spv, trusted: [{height: 102,
+        hash: Buffer.from(await full.chain.getHash(102)).reverse()
+          .toString('hex')}]});
+      assert.deepStrictEqual(await trusted.below(102, 102),
+        [{height: 102, hash: await full.chain.getHash(102)}]);
+      const vault2 = new Vault({storage: new Storage(), iterations: 1000});
+      await vault2.create('correct horse');
+      await vault2.importText(old.toSecret('regtest'), 'old',
+        {network: 'regtest', height: 102});
+      const coins2 = new Coins({vault: vault2, node: spv, blocks: trusted});
+      await coins2.open();
+      const tokens2 = new Tokens({coins: coins2, node: spv});
+      fetched = 0;
+      const token2 = await tokens2.add(genesis.txid(), 102);
+      assert.strictEqual(token2.ticker, 'OLD');
+      assert.strictEqual(fetched, 0);
+      const key2 = vault2.list('regtest').find(k => k.name === 'old');
+      coins2.watch(key2);
+      // As a page does for a key it holds no state for: its history from
+      // its birth, the trusted block.
+      await coins2.rescan(key2, 102);
+      await tokens2.checkAll();
+      const coin2 = coins2.unspent(key2.address)
+        .find(c => c.txid === tokenSend.txid());
+      assert.strictEqual(tokens2.status(coin2), 'valid');
+
+      // A trusted hash is believed only for the block that hashes to it:
+      // one no peer has yields nothing, rather than another block's data.
+      const nowhere = new History({node: spv, trusted: [{height: 102,
+        hash: '00'.repeat(31) + '01'}]});
+      const seen = [];
+      await assert.rejects(nowhere.scanBlocks({start: 102, end: 102,
+        filter: BloomFilter.fromRate(10, 0.0001, 0)},
+      async entry => seen.push(entry)), /does not have a scanned block/);
+      assert.strictEqual(seen.length, 0);
     } finally {
       if (spv)
         await spv.close();
