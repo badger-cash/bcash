@@ -11,6 +11,7 @@
  */
 
 const assert = require('bsert');
+const bio = require('bufio');
 const random = require('bcrypto/lib/random');
 const secp256k1 = require('bcrypto/lib/secp256k1');
 const hash160 = require('bcrypto/lib/hash160');
@@ -42,7 +43,9 @@ suite(title, function() {
     '-avaproofstakeutxoconfirmations=1',
     '-avaminquorumstake=0',
     '-avaminavaproofsnodecount=0',
-    '-whitelist=noban@127.0.0.1'
+    '-whitelist=noban@127.0.0.1',
+    // Regtest blocks come seconds apart: RTT would park them.
+    '-enablertt=0'
   ], {p2p: true}) : null;
 
   const nodes = [];
@@ -215,4 +218,36 @@ suite(title, function() {
       await until(() => abc.call('isfinalblock', hash), 120000);
       assert(await abc.call('isfinalblock', hash));
     });
+
+  it('should be polled for more than 16 items at once', async () => {
+    // The largest poll ABC sends any node, from its item count: the
+    // round, then the count. bcash's own nodes poll each other too.
+    let largest = 0;
+    for (const n of nodes) {
+      const ava = n.pool.avalanche;
+      const handlePoll = ava.handlePoll.bind(ava);
+      ava.handlePoll = (state, data) => {
+        if (state.peer.agent.includes('Bitcoin ABC')) {
+          const br = bio.read(data);
+          br.readBytes(8);
+          largest = Math.max(largest, br.readVarint());
+        }
+        return handlePoll(state, data);
+      };
+    }
+
+    // More proofs than a legacy poll holds, for ABC to poll at once. It
+    // reads a hello's poll limit only from a peer at protocol 70017 or
+    // later, and takes 16 otherwise.
+    const proofs = [];
+    for (let i = 0; i < 24; i++)
+      proofs.push((await bcashProof()).proof);
+    await abc.call('generatetodescriptor', 1, descriptor);
+
+    for (const proof of proofs)
+      assert(await abc.call('sendavalancheproof', proof.toHex()));
+
+    await until(() => largest > 16, 120000).catch(() => {});
+    assert(largest > 16, `largest poll from ABC: ${largest} items`);
+  });
 });
