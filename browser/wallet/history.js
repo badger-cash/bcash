@@ -22,6 +22,13 @@
  *
  * scanBlocks takes any range, below the anchor, above it, or across it:
  * above, from the chain's own headers, as before.
+ *
+ * A page may also trust a block of its own, by height and hash (trust()):
+ * a block its host names, such as the one holding a token's genesis. That
+ * block is its own proof, as a checkpoint is: scanning it needs no header
+ * at all, since the merkle block got for it must hash to it. And it stands
+ * between stretches like any trusted point, so the headers fetched around
+ * it are fewer.
  */
 
 const assert = require('bsert');
@@ -32,9 +39,26 @@ class History {
    * @param {SPVNode} options.node
    */
 
-  constructor({node}) {
+  constructor({node, trusted = []}) {
     this.node = node;
     this.stretches = new Map();
+    this.trusted = new Map();
+    for (const point of trusted)
+      this.trust(point);
+  }
+
+  /**
+   * Trust a block by its height and hash (as explorers show it), as a
+   * checkpoint is trusted: below the anchor, it is proven by its hash.
+   * @param {Object} point - {height, hash}
+   */
+
+  trust({height, hash}) {
+    assert((height >>> 0) === height, 'A trusted block needs a height.');
+    assert(typeof hash === 'string' && /^[0-9a-f]{64}$/.test(hash),
+      'A trusted block needs its hash, 64 hex digits.');
+    this.trusted.set(height, Buffer.from(hash, 'hex').reverse());
+    this.stretches.clear();
   }
 
   /**
@@ -64,7 +88,7 @@ class History {
 
   /**
    * The points trusted below the anchor, in order: the genesis, each
-   * checkpoint, the anchor.
+   * checkpoint, each block trusted, the anchor.
    * @returns {Object[]} [{height, hash}]
    */
 
@@ -72,10 +96,18 @@ class History {
     const {network} = this.node;
     const anchor = this.anchor;
     const points = [{height: 0, hash: network.genesis.hash}];
+    const seen = new Set([0]);
 
     for (const [height, hash] of Object.entries(network.checkpointMap)) {
       const h = Number(height);
-      if (h > 0 && h < anchor.height)
+      if (h > 0 && h < anchor.height) {
+        points.push({height: h, hash});
+        seen.add(h);
+      }
+    }
+
+    for (const [h, hash] of this.trusted) {
+      if (h > 0 && h < anchor.height && !seen.has(h))
         points.push({height: h, hash});
     }
 
@@ -115,6 +147,13 @@ class History {
    */
 
   async below(lo, hi) {
+    // Every block wanted trusted: each its own proof, no header fetched.
+    const wanted = [];
+    for (let h = lo; h <= hi && this.trusted.has(h); h++)
+      wanted.push({height: h, hash: this.trusted.get(h)});
+    if (wanted.length === hi - lo + 1)
+      return wanted;
+
     const points = this.points();
     const entries = [];
 
