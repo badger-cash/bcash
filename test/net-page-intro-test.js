@@ -31,7 +31,7 @@ describe('Page introductions', function() {
     const FullNode = require('../lib/node/fullnode');
     const SPVNode = require('../lib/node/spvnode');
 
-    const base = 20000 + crypto.randomInt(0, 9000) * 2;
+    const base = 20000 + crypto.randomInt(0, 5000) * 2;
 
     const node = new FullNode({
       network: 'regtest',
