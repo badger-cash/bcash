@@ -292,7 +292,7 @@ A page can't be dialed, so the full nodes introduce pages to each other:
    crosses one node, however far apart the two pages' home nodes are, and
    each is signed by its sender, so no one else can speak for a page.
 4. **The pages are peers.** The data channel carries the usual P2P
-   messages. Pages don't sync from each other: neither has blocks to give.
+   messages, and pages sync from each other (see below).
 
 The data channel is encrypted between the two pages (WebRTC always is),
 so the introducing node can't read it. It does see the offer and answer,
@@ -304,3 +304,34 @@ A page keeps up to 4 WebRTC peers (`rtcMaxPeers`), counted apart from its
 connections to full nodes. Some networks, such as some mobile carriers,
 block the direct path WebRTC needs; pages on them still work, just
 without page peers.
+
+### Pages syncing from each other
+
+A page with WebRTC keeps its newest blocks whole, so it can serve them to
+other pages. That lets a page stay synced through its page peers when it
+loses every full node.
+
+- **The window.** A page keeps the newest 288 blocks (about 2 days, as
+  BIP 159's limited nodes do), and at most 25 MB, whichever is fewer
+  (`windowBlocks` and `windowBytes`). On mainnet that's about 8 MB today.
+- **Getting it.** While catching up, a page fetches filtered blocks, as
+  before. Blocks within 288 of the best height its nodes report, it fetches
+  whole and filters itself; it checks each one against its header before
+  keeping it. So nothing is downloaded twice. After a reload, the window
+  is empty (it lives in memory for now), and the page fetches it again
+  from its full node, newest first.
+- **Serving it.** A page answers its page peers' requests for headers and
+  for blocks, whole or filtered for them, from what it holds, and tells
+  them each new block. It also tells them the range of heights it holds
+  (`blockrange`).
+- **Syncing from a page.** A page with no full node to sync from syncs from
+  a page peer that holds blocks, and keeps the blocks it gets, in turn, for
+  its own page peers.
+
+Blocks still come from full nodes: at least one page in a group of
+connected pages needs a full node, or none of them see new blocks. A page
+can only catch up through pages as far back as their windows reach.
+
+On mainnet, syncing two weeks of blocks this way took about 8 seconds and
+9 MB, against about 6.5 seconds and 0.4 MB with filtered blocks alone; the
+difference is the window the page ends up holding.
