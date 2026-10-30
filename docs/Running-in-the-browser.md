@@ -328,6 +328,19 @@ loses every full node.
   a page peer that holds blocks, and keeps the blocks it gets, in turn, for
   its own page peers.
 
+- **Unconfirmed transactions.** Once synced, a page asks its peers for
+  every unconfirmed transaction, with a filter that matches anything, and
+  keeps them (up to 5 MB, for an hour, or until a block confirms them) to
+  pass on: to its page peers whose filters match them, and to its full
+  nodes. So a page with no full node still hears of payments to it, and
+  its own payments still reach a full node, through another page. A page
+  has no coins to check a transaction against, so it checks only that one
+  is well formed; full nodes check the rest, and the wallet shows a
+  payment as pending until a block confirms it.
+- **Privacy.** A page's own filter stays in the page once it is synced:
+  its peers see a filter matching everything, so they can't tell which
+  addresses are its. While catching up, it still uses its own filter.
+
 Blocks still come from full nodes: at least one page in a group of
 connected pages needs a full node, or none of them see new blocks. A page
 can only catch up through pages as far back as their windows reach.

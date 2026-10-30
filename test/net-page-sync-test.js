@@ -206,6 +206,35 @@ describe('Page sync', function() {
 
         // And keeps them whole in turn, for its own page peers.
         await until(() => a.pool.window.high() === 23, 'page A window');
+
+        // Page A misses five blocks, then catches up from page B: asking
+        // what follows its tip (getblocks), the older three filtered for
+        // it (its window here: the newest two) and the newest two whole.
+        const handleBlockInv = a.pool.handleBlockInv.bind(a.pool);
+        a.pool.handleBlockInv = async () => {};
+        await rpc('generatetoaddress', 5, address.toString('regtest'));
+        await until(() => rtcPeer(a).blockRange.high === 28, 'page B at 28');
+        assert.strictEqual(a.chain.height, 23);
+
+        a.pool.handleBlockInv = handleBlockInv;
+        a.pool.window.maxBlocks = 2;
+        const asked = {filtered: 0, whole: 0};
+        const peerA = rtcPeer(a);
+        const getItems = peerA.getItems.bind(peerA);
+        peerA.getItems = (type, hashes) => {
+          if (type === 3)
+            asked.filtered += hashes.length;
+          else if (type === 2)
+            asked.whole += hashes.length;
+          return getItems(type, hashes);
+        };
+        peerA.syncing = false;
+        await a.pool.sendSync(peerA);
+
+        await until(() => a.chain.height === 28, 'page A caught up');
+        assert.bufferEqual(a.chain.tip.hash, node.chain.tip.hash);
+        assert.deepStrictEqual(asked, {filtered: 3, whole: 2});
+        await until(() => paid.size === 8, 'page A saw all its payments');
       } finally {
         for (const page of pages)
           await page.close();
