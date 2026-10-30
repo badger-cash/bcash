@@ -4,6 +4,7 @@
 
 const Config = require('bcfg');
 const WalletClient = require('../lib/client/wallet');
+const TX = require('../lib/primitives/tx');
 
 const ports = {
   main: 8334,
@@ -61,11 +62,6 @@ class CLI {
     return console.log(JSON.stringify(json, null, 2));
   }
   
-  async getServerInfo() {
-    const info = await this.client.get('/');
-    this.log(info);
-  }
-
   async getWallets() {
     const wallets = await this.client.getWallets();
     this.log(wallets);
@@ -181,13 +177,6 @@ class CLI {
   async createChange() {
     const account = this.config.str([0, 'account']);
     const addr = await this.wallet.createChange(account);
-
-    this.log(addr);
-  }
-
-  async createNested() {
-    const account = this.config.str([0, 'account']);
-    const addr = await this.wallet.createNested(account);
 
     this.log(addr);
   }
@@ -360,10 +349,11 @@ class CLI {
   }
 
   async viewTX() {
+    // Decoded here: the server isn't needed to read a transaction.
     const raw = this.config.str([0, 'tx']);
-    const tx = await this.wallet.fill(raw);
+    const tx = TX.fromRaw(raw, 'hex');
 
-    this.log(tx);
+    this.log(tx.getJSON(this.network));
   }
 
   async getDetails() {
@@ -493,9 +483,6 @@ class CLI {
 
   async handleWallet() {
     switch (this.argv.shift()) {
-      case 'info':
-	await this.getServerInfo();
-        break;
       case 'listen':
         await this.listenWallet();
         break;
@@ -552,9 +539,6 @@ class CLI {
         break;
       case 'change':
         await this.createChange();
-        break;
-      case 'nested':
-        await this.createNested();
         break;
       case 'retoken':
         await this.retoken();
@@ -627,7 +611,6 @@ class CLI {
         this.log('  $ account get [account-name]: Get account details.');
         this.log('  $ address: Derive new address.');
         this.log('  $ change: Derive new change address.');
-        this.log('  $ nested: Derive new nested address.');
         this.log('  $ retoken: Create new api key.');
         this.log('  $ send [address] [value]: Send transaction.');
         this.log('  $ mktx [address] [value]: Create transaction.');

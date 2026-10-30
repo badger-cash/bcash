@@ -56,8 +56,8 @@ v0.34.2. The few places where bcash behaves differently are listed in
 |---|---|---|
 | Finalizes blocks by polling stakers | yes | yes |
 | Parks blocks that break a policy (real time targeting, miner fund, staking reward, pre-consensus) | yes | no |
-| Learns each block's staking reward winner | yes, where staking rewards are on (mainnet) | no |
-| Finalizes transactions before they're mined (pre-consensus) | its mempool | only its own transactions, and only when its pool is set up for it (see [SPV Clients](#spv-clients-finality-for-your-own-transactions)) |
+| Learns each block's staking reward winner | yes, where staking rewards are on (mainnet) | yes, where staking rewards are on (mainnet) |
+| Finalizes transactions before they're mined (pre-consensus) | its mempool | only its own transactions (see [SPV Clients](#spv-clients-finality-for-your-own-transactions)) |
 | Answers other nodes' polls | yes | no |
 | Stakes a proof of its own | yes, with `--ava-proof` | no |
 
@@ -154,6 +154,8 @@ capitals, with underscores for dashes (`BCASH_MAX_AVALANCHE_OUTBOUND`).
 ### Policies and pre-consensus (full nodes)
 
 All of these except `enable-miner-fund` take effect only with `avalanche` on.
+An SPV node also reads two of them: `avalanche-preconsensus`, to poll its own
+transactions, and `avalanche-staking-rewards`, to learn each block's winners.
 
 | Option | Default | What it does |
 |---|---|---|
@@ -217,16 +219,20 @@ same in bcash and Bitcoin ABC, whichever one built them.
 
 ## SPV Clients: Finality for Your Own Transactions
 
-An SPV client can learn when its own transactions are finalized. Its pool has
-to be created with `avalanche: true` and `avalanchePreConsensus: true`, as
-`scripts/avalanche-roundtrip.js` does. An `SPVNode` doesn't pass
-`avalanchePreConsensus` to its pool, and has no option for it, so in an
-`SPVNode` the transactions watched below are never polled.
+An SPV client can learn when its own transactions are finalized. An
+`SPVNode` with `avalanche` does this by default: each transaction it
+broadcasts (`node.broadcast(tx)`, `node.sendTX(tx)`) is watched, and polled
+once pre-consensus is active. `avalanche-preconsensus: false` turns it off.
+Like a full node, it also learns each block's staking reward winners where
+the network pays them (`avalanche-staking-rewards`).
 
-Watch the transaction before broadcasting it, then listen for the outcome:
+With a `Pool` of your own, create it with `avalanche: true` and
+`avalanchePreConsensus: true`, as `scripts/avalanche-roundtrip.js` does, and
+watch the transaction before broadcasting it. Either way, listen for the
+outcome on the pool:
 
 ```js
-await pool.avalanche.watchTransaction(tx);
+await pool.avalanche.watchTransaction(tx); // done for you by an SPVNode
 await pool.broadcast(tx);
 
 pool.on('tx final', tx => {});    // finalized: as good as mined

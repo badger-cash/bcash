@@ -218,6 +218,33 @@ describe('HTTP', function() {
     assert.strictEqual(info.n, 2);
   });
 
+  it('should get a block header by height and hash', async () => {
+    const tip = node.chain.tip;
+
+    const byHeight = await nclient.getBlockHeader(tip.height);
+    assert.deepStrictEqual(byHeight, {...tip.toJSON(), isFinal: false});
+
+    const byHash = await nclient.getBlockHeader(tip.rhash());
+    assert.deepStrictEqual(byHash, byHeight);
+
+    assert.strictEqual(await nclient.getBlockHeader(tip.height + 1), null);
+  });
+
+  it('should refuse to serve publicly without an API key', () => {
+    const create = options => new FullNode({
+      network: 'regtest',
+      memory: true,
+      workers: false,
+      listen: false,
+      httpHost: '0.0.0.0',
+      ...options
+    });
+
+    assert.throws(() => create({}), /needs an API key/);
+    assert(create({apiKey: 'bar'}));
+    assert(create({noAuth: true}));
+  });
+
   it('should get a block template', async () => {
     const json = await nclient.execute('getblocktemplate', []);
     assert.deepStrictEqual(json, {

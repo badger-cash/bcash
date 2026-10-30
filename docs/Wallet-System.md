@@ -37,19 +37,29 @@ account's key is derived from the wallet's master key along the path
 `m/44'/coin_type'/account'`, and addresses along `branch/index` below it,
 where branch 0 is for receiving and branch 1 is for change.
 
-The coin type comes from the network's `keyPrefix.coinType` in
-`lib/protocol/networks.js`:
+Each wallet and each account records the coin type it was made with, and
+derives its keys at that coin type from then on. A new one takes the
+network's `keyPrefix.coinType` (`lib/protocol/networks.js`):
 
 | Network | Coin type |
 |---------|-----------|
-| main    | 0         |
+| main    | 1899      |
 | testnet | 1         |
 | regtest | 1         |
 | simnet  | 115       |
 
-Note that mainnet uses 0, the same path as Bitcoin, and not eCash's
-registered SLIP-44 coin type. A seed restored into another eCash wallet will
-only show the same addresses if that wallet also derives along `m/44'/0'`.
+On mainnet, 1899 is the coin type Cashtab and bcash's own web wallet use, so
+a phrase from a new wallet shows the same addresses in them.
+
+Up to v2.7.0-avalanche.18, mainnet wallets used Bitcoin's 0 (`m/44'/0'`)
+and recorded no coin type. A wallet or account saved without one keeps 0, for
+its addresses, the private keys that sign for them, and any accounts added
+to it later, so nothing already made changes. To use such a phrase in
+another eCash wallet, that wallet must derive along `m/44'/0'`.
+
+The record keeps the coin type after the fields earlier versions read, so
+an earlier version can still open the database. It derives a 1899 wallet's
+private keys at 0, though, so it can't sign for one.
 
 bcoin once also supported BIP45 for multisig. That support was removed to
 keep the code simpler; BIP44 accounts cover the same need.

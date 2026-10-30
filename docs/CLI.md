@@ -25,7 +25,6 @@ The bcoin and bcash contributors
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;[Admin commands](#admin-commands)<BR>
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;[Wallet commands](#wallet-commands)<BR>
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;[Send and transaction options](#send-and-transaction-options)<BR>
-&nbsp;&nbsp;&nbsp;&nbsp;[Commands that do not work](#commands-that-do-not-work)<BR>
 &nbsp;&nbsp;&nbsp;&nbsp;[RPC methods](#rpc-methods)<BR>
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;[Node RPC](#node-rpc)<BR>
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;[Wallet RPC](#wallet-rpc)<BR>
@@ -240,6 +239,7 @@ not. `bcash-cli rpc help` and `bwallet-cli rpc help` list the methods.
 | `slp [hash]` | Show the SLP records of a transaction's outputs. |
 | `token [token-id]` | Show an SLP token's record. |
 | `block [hash or height]` | Show a block. |
+| `header [hash or height]` | Show a block header, and whether it is final. Works on an SPV node too. |
 | `fee [target]` | Estimate the fee rate for confirming within `target` blocks (default 1). |
 | `rpc [method] [args...]` | Call a node RPC method. |
 
@@ -299,6 +299,7 @@ These act on the wallet named by `--id` (default `primary`).
 | `tx [hash]` | Show a wallet transaction. |
 | `blocks` | List the heights of blocks that hold wallet transactions. |
 | `block [height]` | Show the wallet transactions in a block. |
+| `view [tx-hex]` | Decode a raw transaction and show it. Done in the client, with no request to the server. |
 | `import [wif or hex]` | Import a private key (WIF) or a public key (hex). |
 | `watch [address]` | Import an address to watch. |
 | `key [address]` | Show the wallet key for an address. |
@@ -326,23 +327,6 @@ the private keys of an encrypted wallet take `--passphrase`.
 | `--subtract-fee` | Take the fee out of the output's value. |
 | `--script [hex]` | Pay to this output script instead of an address. The value is then the first argument. |
 | `--sign` | `mktx` only: sign the transaction it builds. |
-
-## Commands that do not work
-
-Some commands appear in the clients' command lists but fail against this
-release's servers:
-
-- `bcash-cli header`, `bcash-cli filter` and `bcash-cli reset` call
-  `/header`, `/filter` and `/reset`. The node's HTTP server serves none of
-  them (the `/reset` route is commented out), so they fail.
-- `bwallet-cli nested` asks for a nested SegWit address. eCash has no
-  SegWit, and the wallet server has no `/nested` route.
-- `bwallet-cli info` asks the wallet server for `GET /`, which it does not
-  serve.
-- `bwallet-cli view [tx-hex]` calls a client method that does not exist, so
-  it stops with an error.
-- `bwallet-cli admin` is listed in the help, but on its own it only prints
-  the admin commands.
 
 ## RPC methods
 

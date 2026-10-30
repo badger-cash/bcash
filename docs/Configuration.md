@@ -340,8 +340,9 @@ explained in [Avalanche](Avalanche.md). They are:
 - Staking (full nodes): `ava-proof`, `ava-master-key`, `ava-delegation`,
   `ava-session-key`.
 
-An SPV node reads only the first group, and not `ava-cooldown` or
-`persist-avapeers`.
+An SPV node reads the first group, except `ava-cooldown` and
+`persist-avapeers`, and from the second only `avalanche-preconsensus` and
+`avalanche-staking-rewards`.
 
 ## Miner Options
 
@@ -366,7 +367,8 @@ These configure the node's HTTP and JSON-RPC server.
   prefix).
 - `ssl-key`: Path to the SSL key (default: `key.pem` in the prefix).
 - `api-key`: API key for all node APIs. It may differ from the wallet's.
-  If it isn't set, the node makes a random one at each start.
+  It's required when `http-host` is not 127.0.0.1 or ::1, unless `no-auth`
+  is set: without either, the node refuses to start.
 - `no-auth`: Disable API key authentication (default: false, but true when
   no `api-key` is set and `http-host` is 127.0.0.1 or ::1).
 - `cors`: Enable "Cross-Origin Resource Sharing" HTTP headers (default:
@@ -414,7 +416,8 @@ It reads `wallet.conf`, and takes the same options without the prefix.
 - `ssl-key`: Path to the SSL key.
 - `ssl-cert`: Path to the SSL certificate.
 - `api-key`: API key for all wallet APIs (default: the node's `api-key`).
-  It may differ from the node's.
+  It may differ from the node's. As for the node, it's required when
+  `http-host` is not 127.0.0.1 or ::1, unless `no-auth` is set.
 - `no-auth`: Disable API key authentication (default: false, but true when
   no API key is set and `http-host` is 127.0.0.1 or ::1).
 - `cors`: Enable "Cross-Origin Resource Sharing" HTTP headers (default:

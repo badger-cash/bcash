@@ -139,22 +139,6 @@ class CLI {
     this.log(header);
   }
 
-  async getFilter() {
-    let hash = this.config.str(0, '');
-
-    if (hash.length !== 64)
-      hash = parseInt(hash, 10);
-
-    const filter = await this.client.getFilter(hash);
-
-    if (!filter) {
-      this.log('Filter not found.');
-      return;
-    }
-
-    this.log(filter);
-  }
-
   async estimateFee() {
     const blocks = this.config.uint(0, 1);
 
@@ -207,17 +191,6 @@ class CLI {
 
     this.log('Broadcasted:');
     this.log(tx);
-  }
-
-  async reset() {
-    let hash = this.config.str(0);
-
-    if (hash.length !== 64)
-      hash = parseInt(hash, 10);
-
-    await this.client.reset(hash);
-
-    this.log('Chain has been reset.');
   }
 
   async rpc() {
@@ -277,14 +250,8 @@ class CLI {
       case 'header':
         await this.getBlockHeader();
         break;
-      case 'filter':
-        await this.getFilter();
-        break;
       case 'fee':
         await this.estimateFee();
-        break;
-      case 'reset':
-        await this.reset();
         break;
       case 'rpc':
         await this.rpc();
@@ -299,9 +266,7 @@ class CLI {
         this.log('  $ coin [hash+index/address]: View coins.');
         this.log('  $ block [hash/height]: View block.');
         this.log('  $ header [hash/height]: View block header.');
-        this.log('  $ filter [hash/height]: View filter.');
         this.log('  $ fee [target]: Estimate smart fee.');
-        this.log('  $ reset [height/hash]: Reset chain to desired block.');
         this.log('  $ rpc [command] [args]: Execute RPC command.' +
           ' (`bcash-cli rpc help` for more)');
         break;
