@@ -1,6 +1,6 @@
 {
   "name": "bcash",
-  "version": "2.7.0-avalanche.16",
+  "version": "2.7.0-avalanche.17",
   "description": "eCash full node and library",
   "license": "MIT",
   "repository": "git://github.com/badger-cash/bcash.git",
