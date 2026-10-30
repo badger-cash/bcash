@@ -339,9 +339,9 @@ loses every full node.
 - **Getting it.** While catching up, a page fetches filtered blocks, as
   before. Blocks within 288 of the best height its nodes report, it fetches
   whole and filters itself; it checks each one against its header before
-  keeping it. So nothing is downloaded twice. After a reload, the window
-  is empty (it lives in memory for now), and the page fetches it again
-  from its full node, newest first.
+  keeping it. So nothing is downloaded twice. The window is kept in the
+  page's database (IndexedDB), so a page serves it again as soon as it is
+  reopened; anything it misses while closed, it fetches newest first.
 - **Serving it.** A page answers its page peers' requests for headers and
   for blocks, whole or filtered for them, from what it holds, and tells
   them each new block. It also tells them the range of heights it holds
