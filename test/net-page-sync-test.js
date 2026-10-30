@@ -6,9 +6,9 @@
 /*
  * A page keeps its newest blocks whole, and serves them to its page peers:
  * a page that loses every full node stays synced through another page,
- * and sees its payments. WebRTC is an in-memory stand-in; the node and
- * pages speak WebTransport, which needs the optional
- * @fails-components/webtransport.
+ * and sees its payments. A page keeps its window across a restart.
+ * WebRTC is an in-memory stand-in; the node and pages speak WebTransport,
+ * which needs the optional @fails-components/webtransport.
  */
 
 const assert = require('bsert');
@@ -16,6 +16,7 @@ const crypto = require('crypto');
 const {BlockWindow} = require('../lib/net/blockwindow');
 const KeyRing = require('../lib/primitives/keyring');
 const FakeRTCPeerConnection = require('./util/fake-webrtc');
+const common = require('./util/common');
 
 describe('Page sync', function() {
   describe('window', function() {
@@ -239,6 +240,91 @@ describe('Page sync', function() {
         for (const page of pages)
           await page.close();
         await node.close();
+      }
+    });
+
+    it('should keep its window across a restart', async () => {
+      const FullNode = require('../lib/node/fullnode');
+      const SPVNode = require('../lib/node/spvnode');
+
+      const base = 20000 + crypto.randomInt(0, 5000) * 2;
+      const dir = common.testdir('window');
+
+      const node = new FullNode({
+        network: 'regtest',
+        memory: true,
+        workers: false,
+        bip37: true,
+        listen: false,
+        host: '127.0.0.1',
+        httpPort: base + 1,
+        wtPort: base + 2,
+        wtHost: '127.0.0.1'
+      });
+
+      const until = async (check, what, ms = 60000) => {
+        const end = Date.now() + ms;
+        while (!(await check()) && Date.now() < end)
+          await new Promise(r => setTimeout(r, 100));
+        assert(await check(), `Timed out: ${what}`);
+      };
+
+      const page = () => {
+        const [current, next] = node.pool.wt.getHashes();
+        return new SPVNode({
+          network: 'regtest',
+          prefix: dir,
+          memory: false,
+          workers: false,
+          httpPort: base + 3,
+          maxOutbound: 1,
+          webTransport: addon.WebTransport,
+          webRTC: FakeRTCPeerConnection,
+          wtSeeds: [{host: '127.0.0.1', port: base + 2,
+            hashes: [current.hash, next.hash]}]
+        });
+      };
+
+      let p = null;
+
+      try {
+        await node.open();
+        await node.connect();
+        await node.rpc.call({method: 'generatetoaddress', params: [12,
+          KeyRing.generate().getAddress().toString('regtest')]}, {});
+
+        p = page();
+        await p.ensure();
+        await p.open();
+        await p.connect();
+        p.startSync();
+        await until(() => p.chain.height === 12
+          && p.pool.window.size === 12, 'window filled');
+        const held = [...p.pool.window.blocks.keys()].sort();
+        await p.close();
+
+        // Opened again: the same blocks, before any peer is reached.
+        p = page();
+        await p.open();
+        assert.strictEqual(p.pool.window.size, 12);
+        assert.deepStrictEqual([...p.pool.window.blocks.keys()].sort(), held);
+        assert.strictEqual(p.pool.window.low(), 1);
+        assert.strictEqual(p.pool.window.high(), 12);
+
+        // A block it drops goes from its database too.
+        p.pool.window.remove(Buffer.from(held[0], 'hex'));
+        await new Promise(r => setTimeout(r, 100));
+        await p.close();
+
+        p = page();
+        await p.open();
+        assert.strictEqual(p.pool.window.size, 11);
+        assert(!p.pool.window.blocks.has(held[0]));
+      } finally {
+        if (p && p.opened)
+          await p.close();
+        await node.close();
+        await common.rimraf(dir);
       }
     });
   });
