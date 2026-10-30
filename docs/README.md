@@ -13,6 +13,9 @@ Welcome to the bcoin docs!
 - [REST and RPC API][rest-rpc]
 - [Avalanche][avalanche]
 
+## Specifications
+- [SPV+ Protocol Suite][spv-plus]
+
 ## Deployment
 - [Running a Public Node Behind nginx (Hardened)][public-node-nginx]
 
@@ -41,6 +44,8 @@ Welcome to the bcoin docs!
 [avalanche]: Avalanche.md
 [browser]: Running-in-the-browser.md
 [rest-rpc]: http://bcoin.io/api-docs/index.html#introduction
+
+[spv-plus]: SPV-Plus.md
 
 [public-node-nginx]: Public-Node-Nginx-Hardening.md
 
