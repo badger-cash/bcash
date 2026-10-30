@@ -319,6 +319,13 @@ still meet new pages through the pages it knows, and each new link brings
 it more. It keeps the STUN servers its nodes told it of, too, and goes on
 using them: STUN needs no connection to the node.
 
+Each network also lists STUN servers built into bcash (`stunServers` in
+`lib/protocol/networks.js`; `stunServers` overrides them), and a page uses
+them to make up two when its nodes name fewer. Without them, a page whose
+nodes run no STUN can't connect to a page on another network. STUN knows
+no chain, so mainnet and testnet both list `ecash.badger.cash:3478` and
+`webnode.badger.cash:3478`.
+
 A page still needs some reachable go-between on each visit, to be
 introduced at all: a page can't be dialed, and STUN only tells a page its
 own address. That's a full node, such as one a DApp's creator runs for its

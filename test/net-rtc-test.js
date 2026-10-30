@@ -24,8 +24,10 @@ const {
   RTCRecord,
   RTCSignal,
   RTCRecords,
-  DataChannelSocket
+  DataChannelSocket,
+  RTCManager
 } = require('../lib/net/rtc');
+const Network = require('../lib/protocol/network');
 const FakeRTCPeerConnection = require('./util/fake-webrtc');
 
 function makeRecord(options = {}) {
@@ -142,6 +144,52 @@ describe('WebRTC', function() {
       const odd = new RTCSignal({to: key, from: key, time: util.now(),
         kind: 9, data: Buffer.alloc(1)}).sign(priv);
       assert.throws(() => RTCSignal.decode(odd.encode()), /kind/);
+    });
+  });
+
+  describe('STUN servers', function() {
+    const manager = (stunServers) => {
+      return new RTCManager({logger: null}, {
+        RTCPeerConnection: FakeRTCPeerConnection,
+        stunServers
+      });
+    };
+
+    it('should be built in for mainnet and testnet', () => {
+      for (const type of ['main', 'testnet']) {
+        assert.deepStrictEqual(Network.get(type).stunServers,
+          ['ecash.badger.cash:3478', 'webnode.badger.cash:3478']);
+      }
+      assert.deepStrictEqual(Network.get('regtest').stunServers, []);
+    });
+
+    it('should fall back on them with no node STUN', () => {
+      const rtc = manager(['a.example:3478', 'b.example:3478']);
+      assert.deepStrictEqual(rtc.iceServers(),
+        [{urls: ['stun:a.example:3478', 'stun:b.example:3478']}]);
+    });
+
+    it('should take its nodes\' servers first, and make up two', () => {
+      const rtc = manager(['a.example:3478', 'b.example:3478']);
+
+      rtc.stun.push('stun:203.0.113.7:3478');
+      assert.deepStrictEqual(rtc.iceServers(),
+        [{urls: ['stun:203.0.113.7:3478', 'stun:a.example:3478']}]);
+
+      rtc.stun.push('stun:198.51.100.1:3478');
+      assert.deepStrictEqual(rtc.iceServers(),
+        [{urls: ['stun:203.0.113.7:3478', 'stun:198.51.100.1:3478']}]);
+    });
+
+    it('should not list one twice', () => {
+      const rtc = manager(['a.example:3478', 'b.example:3478']);
+      rtc.stun.push('stun:a.example:3478');
+      assert.deepStrictEqual(rtc.iceServers(),
+        [{urls: ['stun:a.example:3478', 'stun:b.example:3478']}]);
+    });
+
+    it('should give none, with none', () => {
+      assert.deepStrictEqual(manager([]).iceServers(), []);
     });
   });
 
