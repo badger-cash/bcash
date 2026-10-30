@@ -294,6 +294,19 @@ A page can't be dialed, so the full nodes introduce pages to each other:
 4. **The pages are peers.** The data channel carries the usual P2P
    messages, and pages sync from each other (see below).
 
+Pages also introduce pages. When two pages connect, each tells the other
+who it is with a signed record; asked, a page shares the records of its
+other page peers, and passes a signal on to the page peer it's addressed
+to, one hop, as a node does. So a page that has lost every full node can
+still meet new pages through the pages it knows, and each new link brings
+it more. It keeps the STUN servers its nodes told it of, too, and goes on
+using them: STUN needs no connection to the node.
+
+A page still needs some reachable go-between on each visit, to be
+introduced at all: a page can't be dialed, and STUN only tells a page its
+own address. That's a full node, such as one a DApp's creator runs for its
+pages.
+
 The data channel is encrypted between the two pages (WebRTC always is),
 so the introducing node can't read it. It does see the offer and answer,
 and could, in principle, put itself in the middle when the connection is
