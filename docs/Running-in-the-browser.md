@@ -81,6 +81,17 @@ bcash --bip37 --wt-port=18335 --wt-host=203.0.113.7
 `--wt-host` must be the public IP address that pages will dial. The
 certificate is issued for it.
 
+To help pages connect to each other over WebRTC (see below), also give the
+node a STUN port, and open it for UDP too:
+
+```
+bcash --bip37 --wt-port=18335 --wt-host=203.0.113.7 --stun-port=3478
+```
+
+Any node that serves pages introduces them to each other; the STUN port is
+optional, but pages behind home routers need some STUN server to find a
+path to each other.
+
 ### Running a seed
 
 A seed is a WebTransport node that also has a domain name and a certificate
@@ -250,3 +261,46 @@ const node = new bcash.SPVNode({
 - `wtSeeds` replaces the network's seeds. Each entry is either
   `"host:port"`, for a seed reached by its domain, or `{host, port, hashes}`,
   for a node reached by its certificate hashes.
+
+### Pages connecting to each other (WebRTC)
+
+Pass the browser's `RTCPeerConnection` as `webRTC`, and the page can also
+connect directly to other pages, as peers:
+
+```js
+const node = new bcash.SPVNode({
+  // ...as above
+  webTransport: WebTransport,
+  webRTC: RTCPeerConnection
+});
+```
+
+A page can't be dialed, so the full nodes introduce pages to each other:
+
+1. **The page announces itself.** It makes a key of its own and tells the
+   first full node it connects to (its *home node*) that it accepts
+   connections. It does that with a short record it signs, naming its key
+   and its home node. The home node adds its certificate hashes, so any
+   page can reach it.
+2. **The nodes spread the record.** bcash full nodes pass records to each
+   other, the way they pass addresses, so a page's record reaches nodes
+   far from its own.
+3. **Another page dials it.** A page that hears of the record dials the
+   other page's home node over WebTransport, if it isn't connected to it
+   already, and sends its WebRTC offer through it, addressed to the other
+   page's key. The node passes it on, and the answer back. Each message
+   crosses one node, however far apart the two pages' home nodes are, and
+   each is signed by its sender, so no one else can speak for a page.
+4. **The pages are peers.** The data channel carries the usual P2P
+   messages. Pages don't sync from each other: neither has blocks to give.
+
+The data channel is encrypted between the two pages (WebRTC always is),
+so the introducing node can't read it. It does see the offer and answer,
+and could, in principle, put itself in the middle when the connection is
+made. That gives it no more power than any peer has: what it sends can
+be checked like anything else from a peer.
+
+A page keeps up to 4 WebRTC peers (`rtcMaxPeers`), counted apart from its
+connections to full nodes. Some networks, such as some mobile carriers,
+block the direct path WebRTC needs; pages on them still work, just
+without page peers.
