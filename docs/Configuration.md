@@ -104,6 +104,11 @@ Note that certain chain options affect the format and indexing of the chain data
   certificate is issued for it (default: `public-host`).
 - `wt-max-inbound`: Max number of inbound WebTransport connections (pages),
   counted separately from `max-inbound` (default: 64).
+- `stun-port`: UDP port to answer STUN requests on (default: off). WebRTC
+  peers, such as web pages connecting to each other, ask a STUN server what
+  public address their traffic comes from. The node answers Binding requests
+  only, a few a second per address at most. The usual port is 3478.
+- `stun-host`: Address to listen for STUN on (default: `host`).
 - `wt-seed-port`: UDP port to serve WebTransport as a seed, using a normal
   certificate for the node's domain name (default: off). Pages that don't know
   any nodes yet dial a seed by name to find some.
