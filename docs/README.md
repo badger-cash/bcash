@@ -72,10 +72,7 @@ The [CLI](CLI.md) document lists every RPC method this release registers.
 - [Get a Transaction from the Chain](Examples/get-tx-from-chain.js)
 
 The examples run from a checkout, with `node docs/Examples/<name>.js`. Those
-that dial the network connect to testnet or mainnet peers. In this release,
-`wallet.js` and `client-api.js` stop at startup, because the wallet module's
-client fails to load (`lib/wallet/client.js` imports `NodeClient` by a name
-that `lib/client/node.js` does not export); they will run once that is fixed.
+that dial the network connect to testnet or mainnet peers.
 
 # Copyright
 

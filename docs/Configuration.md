@@ -345,7 +345,7 @@ An SPV node reads only the first group, and not `ava-cooldown` or
 
 ## Miner Options
 
-- `coinbase-flags`: Text to put in the coinbase (default: mined by bcoin).
+- `coinbase-flags`: Text to put in the coinbase (default: mined by bcash).
 - `coinbase-address`: Payout addresses, one picked at random for each block
   (comma-separated).
 - `preverify`: Verify each block template before handing it out (default:
@@ -460,12 +460,9 @@ both pick up the `http-port` and `api-key` you gave the server.
 ## Sample Config Files
 
 See the [sample node config][sample-conf] and the
-[sample wallet config][sample-wallet-conf] in `etc/`. They show the format,
-but some of their entries are out of date. bcash no longer uses `db`,
-`coin-cache`, `replace-by-fee` or the wallet's `checkpoints`. The miner's
-`max-block-weight`, `reserved-block-weight` and `reserved-block-sigops` are
-now `max-size`, `reserved-size` and `reserved-sigops`, listed
-[above](#miner-options).
+[sample wallet config][sample-wallet-conf] in `etc/`. They show the format
+and the common options, with their defaults or typical values; copy one to
+the prefix directory and edit it.
 
 [sample-conf]: ../etc/sample.conf
 [sample-wallet-conf]: ../etc/sample.wallet.conf
