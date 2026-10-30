@@ -423,6 +423,20 @@ class Coins extends EventEmitter {
   }
 
   /**
+   * Mark a send that only one peer, another page, holds: relayed, but
+   * not yet seen by a full node, which checks it, nor by a second peer.
+   */
+
+  setWeak(txid, weak) {
+    const record = this.state.txs[txid];
+    if (!record || Boolean(record.weak) === weak)
+      return;
+    record.weak = weak;
+    this.save();
+    this.emit('change', txid);
+  }
+
+  /**
    * Undo an unconfirmed transaction the network does not have: the coins
    * it spent are ours again, the coins it made are gone, and so is any
    * unconfirmed transaction spending them.
@@ -614,6 +628,7 @@ class Coins extends EventEmitter {
           net: received - spent,
           token: Boolean(tx.token),
           unsent: Boolean(tx.unsent),
+          weak: Boolean(tx.weak),
           raw: tx.raw || null
         };
       })

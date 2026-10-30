@@ -75,10 +75,14 @@ describe('Page introductions', function() {
 
     const leaveNode = async (page) => {
       page.pool.getHost = () => null;
+      // Collected first: closing a peer takes it out of the list.
+      const nodes = [];
       for (let p = page.pool.peers.head(); p; p = p.next) {
         if (!p.rtc)
-          p.destroy();
+          nodes.push(p);
       }
+      for (const p of nodes)
+        p.destroy();
       await until(() => nodePeers(page) === 0, 'node gone');
     };
 

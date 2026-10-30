@@ -904,6 +904,72 @@ class Tokens extends EventEmitter {
   }
 
   /**
+   * Which of our peers hold each of these unconfirmed transactions. Each
+   * peer is asked in turn, as a pool asks only one peer for a transaction
+   * at a time; each answers for itself, with the transaction or notfound.
+   * @param {String[]} txids
+   * @param {Number} [timeout] - ms to wait for each peer.
+   * @returns {Promise} {holders: Map txid -> [{id, node}], asked}: node,
+   * whether the holder is a full node, which checked it.
+   */
+
+  async whoHas(txids, timeout = 3000) {
+    const {pool} = this.node;
+    const holders = new Map(txids.map(id => [id, []]));
+    const hashes = txids.map(id => Buffer.from(id, 'hex').reverse());
+
+    const peers = [];
+    for (let peer = pool.peers.head(); peer; peer = peer.next) {
+      if (peer.handshake && !peer.destroyed)
+        peers.push(peer);
+    }
+
+    if (peers.length === 0)
+      return {holders, asked: false};
+
+    for (const peer of peers) {
+      if (peer.destroyed)
+        continue;
+
+      const left = new Set(txids);
+
+      await new Promise((resolve) => {
+        let timer = null;
+
+        function done() {
+          clearTimeout(timer);
+          peer.removeListener('packet', onPacket);
+          resolve();
+        }
+
+        function onPacket(packet) {
+          if (packet.type === packetTypes.NOTFOUND) {
+            for (const item of packet.items)
+              left.delete(Buffer.from(item.hash).reverse().toString('hex'));
+          } else if (packet.type === packetTypes.TX) {
+            const txid = packet.tx.txid();
+            if (left.delete(txid))
+              holders.get(txid).push({id: peer.id, node: !peer.rtc});
+          }
+          if (left.size === 0)
+            done();
+        }
+
+        timer = setTimeout(done, timeout);
+        peer.on('packet', onPacket);
+
+        try {
+          pool.getTX(peer, hashes);
+        } catch (e) {
+          done();
+        }
+      });
+    }
+
+    return {holders, asked: true};
+  }
+
+  /**
    * Find transactions by txid, in blocks from `top` down to `floor`, a
    * window at a time; each found is kept.
    * @returns {Promise} Map txid -> {tx, height}

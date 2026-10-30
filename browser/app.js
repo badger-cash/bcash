@@ -403,8 +403,11 @@ async function startNode() {
 }
 
 /**
- * The wallet's sends no node has: marked "not sent", to send again or
- * cancel. A node without one says so (notfound); one that has it sends it.
+ * The wallet's sends no peer has: marked "not sent", to send again or
+ * cancel. Each peer is asked: one without it says so (notfound), one that
+ * has it sends it. A send only one page holds is marked as relayed to one
+ * peer: it is sent once a full node, which checks it, or a second peer
+ * holds it.
  */
 
 let checkingSends = null;
@@ -419,14 +422,17 @@ function checkSends() {
     const pending = tracked.pending();
     if (pending.length === 0)
       return;
-    const {found, asked} = await tokenState.fetchMempool(
+    const {holders, asked} = await tokenState.whoHas(
       pending.map(tx => tx.txid));
     if (!asked)
       return;
     for (const tx of pending) {
       const now = tracked.state.txs[tx.txid];
-      if (now && now.height === -1)
-        tracked.setUnsent(tx.txid, !found.has(tx.txid));
+      if (!now || now.height !== -1)
+        continue;
+      const list = holders.get(tx.txid);
+      tracked.setUnsent(tx.txid, list.length === 0);
+      tracked.setWeak(tx.txid, list.length === 1 && !list[0].node);
     }
   })().catch((err) => {
     log(`Checking sends: ${err.message}`, 'err');
@@ -1028,6 +1034,9 @@ function syncState() {
     const scan = scanProgress();
     if (scan)
       return {text: `Scanning ${scan.pct.toFixed(0)}%`, cls: 'wait', best};
+    // One peer can hold back blocks and payments unseen: say so.
+    if (peers === 1)
+      return {text: `Synced ${num(chain.height)} · 1 peer`, cls: 'wait', best};
     return {text: `Synced ${num(chain.height)}`, cls: 'ok', best};
   }
 
@@ -1126,14 +1135,16 @@ function walletTab(key) {
       tags.push(movement ? 'unknown token' : 'token');
     }
 
-    // No node has it: send it again, or undo it.
+    // No peer has it: send it again, or undo it. Or only one page has it.
     const unsent = tx.unsent && tx.height === -1;
+    const weak = tx.weak && !unsent && tx.height === -1;
 
     return el('li', {},
       el('div', {class: `icon ${sent ? 'out' : 'in'}`}, sent ? '↑' : '↓'),
       el('div', {class: 'what'},
         el('div', {}, label,
           unsent ? el('span', {class: 'tag warn'}, 'not sent') : null,
+          weak ? el('span', {class: 'tag warn'}, 'relayed to 1 peer') : null,
           ...tags.map(t => el('span', {class: 'tag'}, t))),
         el('div', {class: 'muted small'}, `${date} · ${status}`),
         el('a', {class: 'small mono', href: explorer(tx.txid),
