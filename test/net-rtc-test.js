@@ -215,7 +215,7 @@ describe('WebRTC', function() {
       const FullNode = require('../lib/node/fullnode');
       const SPVNode = require('../lib/node/spvnode');
 
-      const base = 20000 + crypto.randomInt(0, 9000) * 2;
+      const base = 20000 + crypto.randomInt(0, 5000) * 2;
       const port = i => base + i * 10;
 
       // N1 - N2 - N3: N1 and N3 know each other only through N2.

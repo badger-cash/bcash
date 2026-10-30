@@ -88,6 +88,15 @@ node a STUN port, and open it for UDP too:
 bcash --bip37 --wt-port=18335 --wt-host=203.0.113.7 --stun-port=3478
 ```
 
+Every bcash full node advertises service bit 27 (`PAGES`): it passes
+pages' records on to other nodes that say so. Addresses travel with their
+service bits through ordinary address gossip, Bitcoin ABC's nodes included,
+so bcash nodes find each other across the network, and each keeps 2 of its
+outbound connections to such nodes. The records themselves pass only
+between bcash nodes, over those direct links: other nodes ignore them. A
+node behind a home router can still dial out to them, but only nodes that
+accept connections spread their addresses.
+
 Any node that serves pages introduces them to each other; the STUN port is
 optional, but pages behind home routers need some STUN server to find a
 path to each other.
