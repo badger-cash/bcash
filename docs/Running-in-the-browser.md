@@ -237,6 +237,14 @@ with its token ID and the height of its genesis block.
 Coins in transactions that carry SLP data are kept apart and never spent as
 plain XEC, so a payment can't accidentally burn a token.
 
+**Other wallets as peers.** Where the browser has WebRTC, the wallet also
+connects to other wallet pages directly, through the introductions
+described in [Pages connecting to each other](#pages-connecting-to-each-other-webrtc).
+They show in the peers list as "page" and the start of their key. The
+wallet keeps its newest blocks to serve them, relays payments with them,
+and, if it loses its full nodes, stays synced through them (see
+[Pages syncing from each other](#pages-syncing-from-each-other)).
+
 **History from before the checkpoint.** An imported key may hold coins from
 before the checkpoint where the page's chain starts. The wallet still finds
 them. It fetches the headers between the checkpoints built into bcash, checks
