@@ -1,4 +1,35 @@
-# Running bcash in the browser
+# Running bcash in the Browser
+### Applies to: bcash v2.7.0-avalanche.18
+### Date updated: October 31, 2026
+
+## Authors
+Vin Armani
+
+# Table of Contents
+[SECTION I: BACKGROUND](#section-i-background)<BR>
+&nbsp;&nbsp;&nbsp;&nbsp;[Introduction](#introduction)<BR>
+&nbsp;&nbsp;&nbsp;&nbsp;[How It Works](#how-it-works)<BR>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;[Finding nodes](#finding-nodes)<BR>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;[Where the chain starts](#where-the-chain-starts)<BR>
+
+[SECTION II: SETUP AND USAGE](#section-ii-setup-and-usage)<BR>
+&nbsp;&nbsp;&nbsp;&nbsp;[Running a Node for Pages](#running-a-node-for-pages)<BR>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;[Running a seed](#running-a-seed)<BR>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;[Connection limits](#connection-limits)<BR>
+&nbsp;&nbsp;&nbsp;&nbsp;[The Web Wallet](#the-web-wallet)<BR>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;[Building](#building)<BR>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;[Hosting](#hosting)<BR>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;[What the wallet does](#what-the-wallet-does)<BR>
+&nbsp;&nbsp;&nbsp;&nbsp;[Using the SPV Node in Your Own Page](#using-the-spv-node-in-your-own-page)<BR>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;[Pages connecting to each other (WebRTC)](#pages-connecting-to-each-other-webrtc)<BR>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;[Pages syncing from each other](#pages-syncing-from-each-other)<BR>
+
+[Copyright](#copyright)
+
+
+# SECTION I: BACKGROUND
+
+## Introduction
 
 bcash can run as an SPV node inside an ordinary web page. The page connects
 straight to bcash full nodes, checks the chain itself, and keeps its data in
@@ -12,15 +43,19 @@ This makes two things possible:
 - **Your own pages** built on bcash's SPV node, using `browser/bcash-spv.js`.
 
 This guide covers how it works, how to run a node that pages can connect to,
-and how to build and host the wallet.
+and how to build and host the wallet. The protocols behind it (WebTransport,
+discovery, WebRTC introductions, syncing and relaying between pages) are
+specified in full in the [SPV+ Protocol Suite Specification](SPV-Plus.md).
 
-## How it works
+## How It Works
 
 Browsers can't open raw TCP connections, so a page can't speak the normal
 peer-to-peer protocol. Browsers do support **WebTransport**, a fast,
 encrypted connection over HTTP/3 (UDP). A bcash full node started with
 `--wt-port` serves the usual P2P protocol over WebTransport as well as TCP,
-and the page connects to it with that.
+and the page connects to it with that. See
+[Transport: WebTransport](SPV-Plus.md#transport-webtransport) for why
+WebTransport rather than WebSocket.
 
 ### Finding nodes
 
@@ -44,9 +79,11 @@ this in three ways:
    hashes with each other in `wtaddr` messages, and answer `getwtaddr` with
    the nodes they know, so a seed can pass them on to pages.
 
-   Browsers accept a pinned certificate only if it lasts 14 days or less, so
-   the node makes a new one every 13 days. It announces the next certificate
-   before switching, so pages that already know the node keep working.
+   Browsers accept a pinned certificate only if it lasts less than 14 days,
+   so each certificate the node makes lasts 13. The node switches to a new
+   one when the current one has two days left, and announces the next
+   certificate before switching, so pages that already know the node keep
+   working. See [Certificates](SPV-Plus.md#certificates).
 
 3. **Memory.** The page stores the nodes it has learned in `localStorage`.
    On the next visit it dials them directly and doesn't need a seed.
@@ -54,16 +91,19 @@ this in three ways:
 ### Where the chain starts
 
 A page doesn't download the whole chain. It starts at the newest checkpoint
-built into bcash and downloads block headers from there. That is a few
-thousand headers on testnet and tens of thousands on mainnet. It happens
-once per browser, because the page keeps its chain in IndexedDB.
+built into bcash and downloads block headers from there, so the download is
+only the headers since that checkpoint. It happens once per browser, because
+the page keeps its chain in IndexedDB.
 
 Starting from a checkpoint is what makes the page trustworthy. The page
 knows that block in advance, and checks every header after it against the
 one before. A page can't safely start from "the tip", because a peer could
 hand it a fake one.
 
-## Running a node for pages
+
+# SECTION II: SETUP AND USAGE
+
+## Running a Node for Pages
 
 A node that pages can use needs three things:
 
@@ -81,23 +121,22 @@ bcash --bip37 --wt-port=18335 --wt-host=203.0.113.7
 `--wt-host` must be the public IP address that pages will dial. The
 certificate is issued for it.
 
-To help pages connect to each other over WebRTC (see below), also give the
-node a STUN port, and open it for UDP too:
+To help pages connect to each other over WebRTC (see
+[below](#pages-connecting-to-each-other-webrtc)), also give the node a STUN
+port, and open it for UDP too:
 
 ```
 bcash --bip37 --wt-port=18335 --wt-host=203.0.113.7 --stun-port=3478
 ```
 
-Every bcash full node advertises service bit 27 (`PAGES`): it passes
-pages' records on to other nodes that say so. Addresses travel with their
-service bits through ordinary address gossip, Bitcoin ABC's nodes included,
-so bcash nodes find each other across the network, and each keeps 2 of its
-outbound connections to such nodes. The records themselves pass only
-between bcash nodes, over those direct links: other nodes ignore them. A
-node behind a home router can still dial out to them, but only nodes that
-accept connections spread their addresses.
+Every bcash full node advertises service bit 27 (`PAGES`) and passes pages'
+records on to other nodes that advertise it, whether or not it serves pages
+itself. Each keeps 2 of its outbound connections to such nodes. A node
+behind a home router can still dial out to them, but only nodes that accept
+connections spread their addresses. See
+[Discovery: the bcash overlay](SPV-Plus.md#discovery-the-bcash-overlay).
 
-Any node that serves pages introduces them to each other; the STUN port is
+Any node that serves pages introduces them to each other. The STUN port is
 optional, but pages behind home routers need some STUN server to find a
 path to each other.
 
@@ -142,7 +181,7 @@ node never turns pages away:
 
 See [Configuration](Configuration.md) for every WebTransport option.
 
-## The web wallet
+## The Web Wallet
 
 ### Building
 
@@ -152,13 +191,14 @@ yarn build-browser
 ```
 
 This writes three bundles to `browser/`, each with a Brotli (`.br`) and a
-gzip (`.gz`) copy beside it:
+gzip (`.gz`) copy beside it. It also writes `.br` and `.gz` copies of
+`index.html`.
 
 | File | What it is | Size with Brotli |
 |---|---|---|
-| `bcash-wallet.js` | The web wallet that `index.html` loads | about 310 KB |
+| `bcash-wallet.js` | The web wallet that `index.html` loads | about 340 KB |
 | `bcash-scan.js` | The QR code reader, loaded the first time you scan | about 27 KB |
-| `bcash-spv.js` | The SPV node on its own, for your own pages | about 275 KB |
+| `bcash-spv.js` | The SPV node on its own, for your own pages | about 300 KB |
 
 The wallet bundle includes only the English BIP39 word list. `bcash-spv.js`
 includes every language.
@@ -177,12 +217,12 @@ elsewhere, change the `og:image` tag to your own address.
 
 No special server is required:
 
-- A server that sends the stored compressed files delivers about 310 KB.
+- A server that sends the stored compressed files delivers about 340 KB.
   For nginx, turn on `brotli_static` and `gzip_static`; for Caddy, use
   `precompressed`.
 - Most hosts and CDNs compress files on their own, with much the same
   result.
-- With no compression at all, the wallet is 1.5 MB. It loads more slowly
+- With no compression at all, the wallet is 1.6 MB. It loads more slowly
   but works the same.
 
 The page opens on mainnet the first time, and after that on whichever
@@ -256,15 +296,18 @@ and **Keys → Scan earlier** reaches further back.
 The wallet's code is in `browser/app.js` (the interface) and
 `browser/wallet/` (keys, coins, tokens, sending and history).
 
-## Using the SPV node in your own page
+## Using the SPV Node in Your Own Page
 
 Load `bcash-spv.js`, which exposes `bcash`, and start a node with the
-browser's own `WebTransport`:
+browser's own `WebTransport`, anchored at the newest checkpoint:
 
 ```js
+const anchor = bcash.newestCheckpoint('main');
+
 const node = new bcash.SPVNode({
   network: 'main',
-  prefix: '/bcash',
+  prefix: `/bcash/main-anchor-${anchor.height}`,
+  anchor,
   memory: false,
   workers: false,
   webTransport: WebTransport,
@@ -272,12 +315,22 @@ const node = new bcash.SPVNode({
 });
 ```
 
+- `anchor` is where the chain starts. `bcash.newestCheckpoint(network)`
+  returns the newest checkpoint built into bcash, as `{height, hash}`.
+  Without an anchor, the node starts from the genesis block.
 - `prefix` names the IndexedDB database the chain is kept in, and
-  `memory: false` keeps it between visits.
+  `memory: false` keeps it between visits. The wallet puts the anchor's
+  height in the name, so a release with a newer checkpoint starts a new
+  database rather than reusing one anchored elsewhere.
 - `wtStore` is where the node remembers the WebTransport nodes it learns.
 - `wtSeeds` replaces the network's seeds. Each entry is either
   `"host:port"`, for a seed reached by its domain, or `{host, port, hashes}`,
   for a node reached by its certificate hashes.
+
+`bcash-spv.js` also exposes the classes a page needs to build and check
+its own transactions: `Address`, `KeyRing`, `Script`, `TX`, `MTX`, `Coin`,
+`Outpoint`, `Output`, `consensus`, `script.SLP` and `bip70`
+(`browser/spv.js`).
 
 ### Pages connecting to each other (WebRTC)
 
@@ -292,91 +345,70 @@ const node = new bcash.SPVNode({
 });
 ```
 
-A page can't be dialed, so the full nodes introduce pages to each other:
+A page can't be dialed, so the full nodes introduce pages to each other. In
+short:
 
 1. **The page announces itself.** It makes a key of its own and tells the
-   first full node it connects to (its *home node*) that it accepts
-   connections. It does that with a short record it signs, naming its key
-   and its home node. The home node adds its certificate hashes, so any
-   page can reach it.
+   first full node it connects to (its *home node*), in a short signed
+   record, that it accepts connections.
 2. **The nodes spread the record.** bcash full nodes pass records to each
-   other, the way they pass addresses, so a page's record reaches nodes
-   far from its own.
-3. **Another page dials it.** A page that hears of the record dials the
-   other page's home node over WebTransport, if it isn't connected to it
-   already, and sends its WebRTC offer through it, addressed to the other
-   page's key. The node passes it on, and the answer back. Each message
-   crosses one node, however far apart the two pages' home nodes are, and
-   each is signed by its sender, so no one else can speak for a page.
+   other, the way they pass addresses.
+3. **Another page dials it.** A page that hears of the record connects to
+   the other page's home node, if it isn't already, and sends its WebRTC
+   offer through it. Each message is signed by its sender, so no one else
+   can speak for a page.
 4. **The pages are peers.** The data channel carries the usual P2P
    messages, and pages sync from each other (see below).
 
-Pages also introduce pages. When two pages connect, each tells the other
-who it is with a signed record; asked, a page shares the records of its
-other page peers, and passes a signal on to the page peer it's addressed
-to, one hop, as a node does. So a page that has lost every full node can
-still meet new pages through the pages it knows, and each new link brings
-it more. It keeps the STUN servers its nodes told it of, too, and goes on
-using them: STUN needs no connection to the node.
+Pages also introduce other pages, so a page that has lost every full node
+can still meet new pages through the ones it knows. The full protocol is in
+[Introductions: WebRTC](SPV-Plus.md#introductions-webrtc).
 
-Each network also lists STUN servers built into bcash (`stunServers` in
-`lib/protocol/networks.js`; `stunServers` overrides them), and a page uses
-them to make up two when its nodes name fewer. Without them, a page whose
-nodes run no STUN can't connect to a page on another network. STUN knows
-no chain, so mainnet and testnet both list `ecash.badger.cash:3478` and
-`webnode.badger.cash:3478`.
+What a page author needs to know:
 
-A page still needs some reachable go-between on each visit, to be
-introduced at all: a page can't be dialed, and STUN only tells a page its
-own address. That's a full node, such as one a DApp's creator runs for its
-pages.
-
-The data channel is encrypted between the two pages (WebRTC always is),
-so the introducing node can't read it. It does see the offer and answer,
-and could, in principle, put itself in the middle when the connection is
-made. That gives it no more power than any peer has: what it sends can
-be checked like anything else from a peer.
-
-A page keeps up to 4 WebRTC peers (`rtcMaxPeers`), counted apart from its
-connections to full nodes. Some networks, such as some mobile carriers,
-block the direct path WebRTC needs; pages on them still work, just
-without page peers.
+- **STUN.** A page uses the STUN servers its nodes name, and keeps using
+  them after it loses those nodes. Each network also lists STUN servers
+  built into bcash (`stunServers` in `lib/protocol/networks.js`:
+  `ecash.badger.cash:3478` and `webnode.badger.cash:3478` on both mainnet
+  and testnet), and a page adds from them until it has two. The
+  `stunServers` option replaces that list. See
+  [STUN at the full node](SPV-Plus.md#stun-at-the-full-node).
+- **A full node on each visit.** A page still needs some reachable
+  go-between on each visit, to be introduced at all: a page can't be
+  dialed, and STUN only tells a page its own address. That's a full node,
+  such as one a DApp's creator runs for its pages.
+- **Trust.** The data channel is encrypted between the two pages, so the
+  introducing node can't read it. The node could in principle put itself in
+  the middle when the connection is made, but that gives it no more power
+  than any peer has. See [Security Model](SPV-Plus.md#security-model).
+- **Limits.** A page keeps up to 4 WebRTC peers (`rtcMaxPeers`), counted
+  apart from its connections to full nodes. Some networks, such as some
+  mobile carriers, block the direct path WebRTC needs; pages on them still
+  work, just without page peers.
 
 ### Pages syncing from each other
 
 A page with WebRTC keeps its newest blocks whole, so it can serve them to
 other pages. That lets a page stay synced through its page peers when it
-loses every full node.
+loses every full node. The details are in
+[Syncing: the block window](SPV-Plus.md#syncing-the-block-window) and
+[Relaying: unconfirmed transactions](SPV-Plus.md#relaying-unconfirmed-transactions).
 
-- **The window.** A page keeps the newest 288 blocks (about 2 days, as
-  BIP 159's limited nodes do), and at most 25 MB, whichever is fewer
-  (`windowBlocks` and `windowBytes`). On mainnet that's about 8 MB today.
-- **Getting it.** While catching up, a page fetches filtered blocks, as
-  before. Blocks within 288 of the best height its nodes report, it fetches
-  whole and filters itself; it checks each one against its header before
-  keeping it. So nothing is downloaded twice. The window is kept in the
-  page's database (IndexedDB), so a page serves it again as soon as it is
-  reopened; anything it misses while closed, it fetches newest first.
-- **Serving it.** A page answers its page peers' requests for headers and
-  for blocks, whole or filtered for them, from what it holds, and tells
-  them each new block. It also tells them the range of heights it holds
-  (`blockrange`).
+- **The window.** A page keeps the newest 288 blocks (about 2 days), and at
+  most 25 MB, whichever is fewer (`windowBlocks` and `windowBytes`). On
+  mainnet that's about 8 MB today. The window is kept in IndexedDB, so a
+  page serves it again as soon as it is reopened.
 - **Syncing from a page.** A page with no full node to sync from syncs from
-  a page peer that holds blocks, and keeps the blocks it gets, in turn, for
-  its own page peers.
-
-- **Unconfirmed transactions.** Once synced, a page asks its peers for
-  every unconfirmed transaction, with a filter that matches anything, and
-  keeps them (up to 5 MB, for an hour, or until a block confirms them) to
-  pass on: to its page peers whose filters match them, and to its full
-  nodes. So a page with no full node still hears of payments to it, and
-  its own payments still reach a full node, through another page. A page
-  has no coins to check a transaction against, so it checks only that one
-  is well formed; full nodes check the rest, and the wallet shows a
-  payment as pending until a block confirms it.
-- **Privacy.** A page's own filter stays in the page once it is synced:
-  its peers see a filter matching everything, so they can't tell which
-  addresses are its. While catching up, it still uses its own filter.
+  a page peer that holds blocks, and keeps what it gets for its own page
+  peers.
+- **Unconfirmed transactions.** A page keeps the unconfirmed transactions
+  it hears of (up to 5 MB, for an hour, or until a block confirms them) and
+  passes them on, so payments still reach a full node through another page.
+  A page can check only that a transaction is well formed, so the wallet
+  shows a payment as pending until a block confirms it.
+- **Privacy.** Once synced, a page's peers see a filter matching
+  everything, so they can't tell which addresses are its. While catching
+  up, it still uses its own filter.
 
 Blocks still come from full nodes: at least one page in a group of
 connected pages needs a full node, or none of them see new blocks. A page
@@ -385,3 +417,8 @@ can only catch up through pages as far back as their windows reach.
 On mainnet, syncing two weeks of blocks this way took about 8 seconds and
 9 MB, against about 6.5 seconds and 0.4 MB with filtered blocks alone; the
 difference is the window the page ends up holding.
+
+
+# Copyright
+
+This document is published under the terms of the MIT license.

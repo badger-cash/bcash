@@ -1,167 +1,287 @@
+# Beginner's Guide
+### Applies to: bcash v2.7.0-avalanche.18
+### Date updated: October 31, 2026
+
+## Authors
+The bcoin and bcash contributors
+
+# Table of Contents
+[SECTION I: BACKGROUND](#section-i-background)<BR>
+&nbsp;&nbsp;&nbsp;&nbsp;[Introduction](#introduction)<BR>
+
+[SECTION II: SETUP](#section-ii-setup)<BR>
+&nbsp;&nbsp;&nbsp;&nbsp;[Requirements](#requirements)<BR>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;[Native modules](#native-modules)<BR>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;[Other operating systems](#other-operating-systems)<BR>
+&nbsp;&nbsp;&nbsp;&nbsp;[Installing](#installing)<BR>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;[Troubleshooting](#troubleshooting)<BR>
+&nbsp;&nbsp;&nbsp;&nbsp;[Starting Your First Node](#starting-your-first-node)<BR>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;[Default ports](#default-ports)<BR>
+&nbsp;&nbsp;&nbsp;&nbsp;[The HTTP Server](#the-http-server)<BR>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;[Listening externally](#listening-externally)<BR>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;[Using an API key](#using-an-api-key)<BR>
+
+[SECTION III: NETWORK OPTIONS](#section-iii-network-options)<BR>
+&nbsp;&nbsp;&nbsp;&nbsp;[Using Tor and SOCKS](#using-tor-and-socks)<BR>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;[Running bcash as a Tor hidden service](#running-bcash-as-a-tor-hidden-service)<BR>
+&nbsp;&nbsp;&nbsp;&nbsp;[Target Nodes](#target-nodes)<BR>
+&nbsp;&nbsp;&nbsp;&nbsp;[Disabling Listening](#disabling-listening)<BR>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;[Selfish mode](#selfish-mode)<BR>
+&nbsp;&nbsp;&nbsp;&nbsp;[Further Configuration](#further-configuration)<BR>
+
+[Copyright](#copyright)
+
+
+# SECTION I: BACKGROUND
+
 ## Introduction
 
-Bcash is an _alternative_ implementation of the bitcoin protocol, written in node.js. It is a full node which can be used for full blockchain validation and is aware of all known consensus rules.
+bcash is an alternative implementation of the eCash (XEC) protocol, written
+in JavaScript for Node.js. It is a fork of bcoin. A bcash full node validates
+the whole blockchain and follows eCash's consensus rules, and it can also take
+part in Avalanche (see [Avalanche](Avalanche.md)).
+
+This guide covers installing bcash, starting a node, and the options most
+people need first.
+
+# SECTION II: SETUP
 
 ## Requirements
 
-- Linux, OSX, or Windows (\*) (\*\*)
-- node.js >=v8.14.0
-- npm >=v6.4.1
-- python2 (for node-gyp)
-- gcc/g++ (for leveldb and secp256k1)
-- git (optional, see below)
+- Linux. bcash is developed and run on Linux.
+- Node.js 18, 20 or 24 (`package.json` asks for 18 or later).
+- Yarn 1. The repository has a `yarn.lock` and no `package-lock.json`, so
+  install with `yarn`, not `npm`.
+- git. Most dependencies are fetched straight from their git repositories.
+- Python 3, `make` and a C/C++ compiler (gcc/g++ or clang), for
+  `node-gyp`, which builds the native modules.
 
-(\*): Note that bcash works best with unix-like OSes, and has not yet been thoroughly tested on windows.
+### Native modules
 
-(\*\*): The BSDs and Solaris have also not been tested yet, but should work in theory.
+Five dependencies are native modules that `node-gyp` compiles for your
+Node.js during `yarn install`:
 
-## Build & Install
+| Module  | What it does                          | If the build fails       |
+|---------|---------------------------------------|--------------------------|
+| bcrypto | Hashing, secp256k1 and other crypto   | `yarn install` fails     |
+| bdb     | LevelDB, the node's database          | `yarn install` fails     |
+| mrmr    | Murmur3 hashing, for bloom filters    | `yarn install` fails     |
+| n64     | 64-bit integers                       | `yarn install` fails     |
+| bstring | Base58, bech32 and cashaddr encoding  | Falls back to JavaScript |
 
-Bcash is meant to be installed via npm, but for the security conscious, it may be better to clone from github.
+`node-gyp` itself is partly written in Python, so Python 3 must be on your
+`PATH` even though none of these modules contains Python code.
 
-### Installing via NPM
+There is also one optional dependency, `@fails-components/webtransport`. It
+lets a full node serve WebTransport to browser pages (`--wt-port`; see
+[Running in the browser](Running-in-the-browser.md)). Its install first tries
+to download a prebuilt binary, and builds from source with `cmake-js` only if
+none is available, which can take more than twenty minutes. If it fails, the
+install carries on without it, and only WebTransport is unavailable.
+
+### Other operating systems
+
+macOS and Windows have not been tested with this release.
+
+- On macOS, the `bin/bcash` launcher needs `perl`.
+- On Windows, `bin/bcash` is a bash script, so it needs a shell such as Git
+  Bash. You can also start the node directly with `node bin/node`.
+  `node-gyp` needs Python 3 and Visual Studio's C++ build tools there.
+
+## Installing
+
+bcash is installed from its GitHub repository. (The `bcash` package on npm is
+an old release of bcoin-org's bcash, not this one.)
 
 ``` bash
-$ npm install -g bcash --production
-```
-
-### Installing via Git
-
-``` bash
-$ git clone git://github.com/bcoin-org/bcash.git
+$ git clone https://github.com/badger-cash/bcash.git
 $ cd bcash
-$ npm install -g --production
+$ git checkout v2.7.0-avalanche.18
+$ yarn install
 ```
 
-**Note:** Dependencies are checked for integrity using `package-lock.json`. However `npm` _will not_ make these checks with `npm install -g` and it will link your installation globally so that `bcash` is in your path _(e.g. $ bcash)_.
+Releases are tagged; the list is at
+https://github.com/badger-cash/bcash/releases.
 
-### Installing via Docker
+The commands live in `bin/`: `bcash`, `bcash-cli` and `bwallet-cli`, among
+others. To run them by name, add that directory to your `PATH`:
 
-Check [bcash-docker](https://github.com/bcoin-org/bcash-docker)
-
-### Installing on Windows
-
-Install OpenSSL v1.0.2L 64-Bit:
-
-https://slproweb.com/download/Win64OpenSSL-1_0_2L.exe
-
-As Administrator, open `cmd.exe` and run:
-
-```console
-C:\Users\bcash\bcash>npm install --global --production windows-build-tools
+``` bash
+$ export PATH="$PWD/bin:$PATH"
 ```
-
-to install `VCBuild.exe` and `Python 2.7.x` both required by `node-gyp`
-for building native modules.
-
-Then continue [Installing via Git](#installing-via-git)
-
-Note that you need a shell that supports bash scripts, like Git Bash to launch
-bcash.
 
 ### Troubleshooting
 
-If the build fails compilation for `bcash-native` or `secp256k1-node` __validation will be slow__ (a block verification which should take 1 second on consumer grade hardware may take up to 15 seconds). Bcash will throw a warning on boot if it detects a build failure. If you run into this issue, please post an issue on the repo.
+If `yarn install` stops while building bcrypto, bdb, mrmr or n64, check that
+Python 3, `make` and a C++ compiler are installed and that you are on Node.js
+18, 20 or 24.
 
-## Starting up your first bcash node
+The native modules are built for one Node.js version. If you switch versions
+later, rebuild them: delete `node_modules` and run `yarn install` again.
 
-If bcash is installed globally, `$ bcash` should be in your PATH. If not, the bcash bootstrap script resides in `/path/to/bcash/bin/bcash`.
+If bstring fails to build, the install still succeeds and bcash uses the
+JavaScript version, which is slower.
+
+If the problem persists, open an issue at
+https://github.com/badger-cash/bcash/issues.
+
+## Starting Your First Node
+
+With `bin/` in your `PATH`, start a node with:
 
 ``` bash
 $ bcash
 ```
 
-Will run a bcash node as the foreground process, displaying all debug logs.
-
-To run as a daemon:
+(Otherwise, run `./bin/bcash` from the checkout.) This runs a full node in the
+foreground and prints its logs, at the `debug` level, to the console. To run
+it in the background instead:
 
 ``` bash
 $ bcash --daemon
 ```
 
-This will start up a full node, complete with: a blockchain, mempool, miner, p2p server, wallet server, and an HTTP REST+RPC server.
+The launcher prints the process ID and exits. The node starts with a
+blockchain, a mempool, a miner, a P2P server, a wallet, and an HTTP server for
+the REST and JSON-RPC APIs. `--no-wallet` leaves the wallet out, and `--spv`
+starts an SPV node instead of a full node.
 
-All logs will be written to `~/.bcash/debug.log` by default.
+Data and logs live in `~/.bcash` by default (`--prefix` changes this). The log
+file is `~/.bcash/debug.log` on mainnet; other networks keep theirs in a
+subdirectory, such as `~/.bcash/testnet/debug.log`.
 
-By default, the http server will only listen on `127.0.0.1:8332`. No auth will be required if an API key was not passed in. If you listen on any other host, auth will be required and an API key will be auto-generated if one was not passed in.
+### Default ports
 
-## Listening Externally
+| Network | P2P   | Node HTTP (REST and RPC) | Wallet HTTP |
+|---------|-------|--------------------------|-------------|
+| main    | 8333  | 8332                     | 8334        |
+| testnet | 18333 | 18332                    | 18334       |
+| regtest | 48444 | 48332                    | 48334       |
 
-To listen publicly on the HTTP server, `--http-host=0.0.0.0` (ipv4) or `--http-host=::` (ipv4 and ipv6) can be passed. Additionally this: `--http-port=1337` can set the port.
+Choose the network with `--network`, for example `--network testnet`.
+`--port` changes the P2P port and `--http-port` the node's HTTP port.
 
-To advertise your node on the P2P network `--public-host=[your-public-ip]` and `--public-port=[your-public-port]` may be passed.
+## The HTTP Server
 
-## Using an API Key
+By default, the node's HTTP server listens only on `127.0.0.1`, at the
+network's HTTP port (8332 on mainnet). On `127.0.0.1` or `::1`, with no API
+key set, no authentication is required.
 
-If listening publicly on the HTTP server, an API key is required. One will be generated and reported in the logs automatically if no key was chosen. An api key can be chosen with the `--api-key` option.
+On any other host, authentication is required. If you do not set an API key,
+bcash makes up a random one and does not show it anywhere, so every request is
+refused. Always set `--api-key` when you listen on another host. (`--no-auth`
+turns authentication off entirely, which is unsafe on a public address.)
 
-Example:
+The wallet's HTTP server follows the same rules on its own port. Its options
+take a `wallet-` prefix (for example `--wallet-http-host`), and it uses the
+node's `--api-key` unless you give it `--wallet-api-key`.
+
+### Listening externally
+
+To serve HTTP on every interface, pass `--http-host=0.0.0.0` (IPv4) or
+`--http-host=::` (IPv4 and IPv6), together with an API key.
+
+To advertise your node on the P2P network, pass `--public-host` with your
+public IP address, and `--public-port` if it differs from the P2P port.
+
+### Using an API key
+
+Choose a key with `--api-key`:
 
 ``` bash
 $ bcash --http-host=0.0.0.0 --api-key hunter2 --daemon
 ```
 
-API keys are used with HTTP Basic Auth:
+The API uses HTTP Basic authentication. The key is the password, and the user
+name can be anything:
 
 ``` bash
 $ curl http://x:hunter2@localhost:8332/
 ```
 
-Bcash CLI is the prepackaged tool for hitting both the REST and RPC api.
+`bcash-cli` talks to the node's REST and RPC APIs, and `bwallet-cli` to the
+wallet's:
 
 ``` bash
-$ bcash cli info --api-key hunter2
-$ bcash rpc getblockchaininfo --api-key hunter2
+$ bcash-cli info --api-key hunter2
+$ bcash-cli rpc getblockchaininfo --api-key hunter2
 ```
 
-## Using Tor/SOCKS
+(The older `bcash cli ...`, `bcash rpc ...` and `bcash wallet ...` forms no
+longer do anything: they print a warning that they are deprecated, and exit.
+See [CLI](CLI.md#the-old-bcash-cli-form).)
 
-Bcash has native support for SOCKS proxies, and will accept a `--proxy` option in the format of `--proxy=[user]:[pass]@host:port`.
+# SECTION III: NETWORK OPTIONS
 
-Passing the `--onion` option tells bcash that the SOCKS proxy is a Tor socks proxy, and will enable Tor resolution for DNS lookups, as well as try to connect to `.onion` addresses found on the P2P network.
+## Using Tor and SOCKS
+
+bcash can make its outbound P2P connections through a SOCKS5 proxy. Pass
+`--proxy` in the form `[user:pass@]host:port`.
+
+Add `--onion` when the proxy is Tor. bcash then resolves DNS names through
+Tor, and also connects to `.onion` addresses it learns from the network.
 
 ``` bash
 $ bcash --proxy joe:hunter2@127.0.0.1:9050 --onion
 ```
 
-### Running bcash as a tor hidden service
+With `--proxy` set, bcash does not listen for inbound P2P connections, and it
+does not look up its own public address. A staking Avalanche node refuses to
+start with `--proxy`.
 
-Your hidden service must first be configured with `tor`. Once you have the `.onion` address, it can be passed into `--public-host` in the form of `--public-host foo.onion`.
+### Running bcash as a Tor hidden service
+
+First configure the hidden service in `tor`, pointing it at bcash's P2P port.
+Then pass the `.onion` address to bcash with `--public-host foo.onion`, so
+that bcash advertises it to its peers.
+
+Because `--proxy` turns off listening, a node serving as a hidden service
+cannot also send its outbound connections through the proxy.
 
 ## Target Nodes
 
-It's often desirable to run behind several trusted bitcoin nodes. To select permanent nodes to connect to, the `--nodes` option is available:
+You may want to run behind one or more nodes you trust. `--nodes` lists nodes
+that bcash always tries to connect to as outbound peers:
 
 ``` bash
 $ bcash --nodes foo.example.com:8333,1.2.3.4:8333,5.6.7.8:8333
 ```
 
-If chosen, bcash will _always_ try to connect to these nodes as outbound peers. They are top priority and whitelisted (not susceptible to permanent bans, only disconnections).
+bcash dials these nodes before any others and keeps redialing them, even
+after a ban. They are never dropped for syncing slowly or for being on another
+chain.
 
-To _only_ connect to these nodes. `--max-outbound` could be set to 3:
+To connect to these nodes and no others, use `--only` instead. It sets the
+number of outbound peers to the number of nodes listed and turns off peer
+discovery:
 
 ``` bash
-$ bcash --nodes foo.example.com,1.2.3.4,5.6.7.8 --max-outbound 3
+$ bcash --only foo.example.com,1.2.3.4,5.6.7.8
 ```
 
 ## Disabling Listening
 
-To avoid accepting connections on the P2P network altogether, `--listen=false` can be passed to bcash.
+To accept no inbound P2P connections at all, pass `--listen=false`.
 
-### Selfish Mode
+### Selfish mode
 
-Bcash also supports a "selfish" mode. In this mode, bcash still has full blockchain and mempool validation, but network services are disabled: it will not relay transactions or serve blocks to anyone.
+In selfish mode, bcash still validates the blockchain and mempool fully, but
+gives nothing back to the network: it does not relay transactions, serve
+blocks, or answer requests for addresses.
 
 ``` bash
 $ bcash --selfish --listen=false
 ```
 
-Note: Selfish mode is not recommended. We encourage you to _help_ the network by relaying transactions and blocks. At the same time, selfish mode does have its uses if you do not have the bandwidth to spare, or if you're absolutely worried about potential DoS attacks.
+Selfish mode is not recommended. Relaying transactions and blocks helps the
+network. It can make sense if you have no bandwidth to spare, or you are
+worried about denial-of-service attacks.
 
 ## Further Configuration
 
-See [Configuration][configuration].
+See [Configuration](Configuration.md) for the full list of options and the
+`bcash.conf` file.
 
-[keybase]: https://keybase.io/chjj#show-public
-[node]: https://nodejs.org/dist/v7.5.0/
-[configuration]: Configuration.md
+# Copyright
+
+This document is published under the terms of the MIT license.
