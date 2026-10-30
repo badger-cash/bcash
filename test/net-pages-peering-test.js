@@ -30,6 +30,11 @@ describe('Pages peering', function() {
 
     const spv = new SPVNode({network: 'regtest', memory: true});
     assert(!(spv.pool.options.services & services.PAGES));
+
+    // Unless told otherwise, as the nodes below are.
+    const plain = new FullNode({network: 'regtest', memory: true,
+      services: services.NETWORK});
+    assert.strictEqual(plain.pool.options.services, services.NETWORK);
   });
 
   it('should keep a peer among the nodes saying PAGES', async () => {
@@ -94,6 +99,16 @@ describe('Pages peering', function() {
         const peer = node.pool.peers.get(pagesHost);
         return peer && peer.handshake;
       }, 'connected to the node saying PAGES');
+
+      // Every outbound peer answered, so each is judged.
+      await until(() => {
+        let open = 0;
+        for (let p = node.pool.peers.head(); p; p = p.next) {
+          if (p.outbound && p.handshake)
+            open += 1;
+        }
+        return open === 2;
+      }, 'both outbound peers open');
 
       // It passes records on; the others do not.
       const peer = node.pool.peers.get(pagesHost);
