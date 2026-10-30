@@ -163,10 +163,14 @@ describe('Page relay', function() {
 
         // Page A loses its node, and cannot find another.
         a.pool.getHost = () => null;
+        // Collected first: closing a peer takes it out of the list.
+        const nodes = [];
         for (let p = a.pool.peers.head(); p; p = p.next) {
           if (!p.rtc)
-            p.destroy();
+            nodes.push(p);
         }
+        for (const p of nodes)
+          p.destroy();
         await until(() => nodePeers(a) === 0, 'node gone');
 
         // A payment to page A, sent to the node.
