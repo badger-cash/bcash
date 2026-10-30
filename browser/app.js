@@ -15,7 +15,8 @@
  * network has its own node, chain and coins (wallet/coins.js), and the
  * page switches between them in place. Payments are built and signed here
  * (wallet/send.js). The node peers with bcash full nodes over
- * WebTransport, from the newest checkpoint built in.
+ * WebTransport, from the newest checkpoint built in, and with other pages
+ * over WebRTC.
  */
 
 const qrcode = require('qrcode-generator');
@@ -265,6 +266,19 @@ function log(msg, cls) {
     scheduleRender();
 }
 
+/**
+ * What to call a peer: a full node by its address, another page by the
+ * start of its key.
+ * @param {Peer} peer
+ * @returns {String}
+ */
+
+function peerName(peer) {
+  if (peer.rtc && peer.rtcKey)
+    return `page ${peer.rtcKey.toString('hex').slice(0, 16)} (WebRTC)`;
+  return peer.hostname();
+}
+
 /*
  * The node: one per network, started once the keys are open, so they are
  * watched before any block arrives.
@@ -281,6 +295,8 @@ async function startNode() {
     workers: false,
     logConsole: false,
     webTransport: WebTransport,
+    // Other pages, as peers, where the browser has WebRTC.
+    webRTC: typeof RTCPeerConnection === 'function' ? RTCPeerConnection : null,
     wtStore: bcash.localStore(`bcash-wthosts-${network}`)
   });
 
@@ -296,12 +312,16 @@ async function startNode() {
   };
 
   pool.on('peer open', (peer) => {
+    if (peer.rtc) {
+      log(`Connected to ${peerName(peer)} (${peer.agent}).`);
+      return;
+    }
     log(`Connected to ${peer.hostname()} (${peer.agent}), its tip at`
       + ` ${num(peer.height)}.`);
   });
   pool.on('peer close', (peer, connected) => {
     if (connected)
-      log(`Disconnected from ${peer.hostname()}.`);
+      log(`Disconnected from ${peerName(peer)}.`);
   });
   started.on('error', err => log(`Error: ${err.message}`, 'err'));
 
@@ -986,10 +1006,17 @@ function syncState() {
   const {pool, chain} = node;
   let best = chain.height;
   let peers = 0;
+  // Full nodes, and pages holding blocks to sync from: a page's best is
+  // the newest block it holds, not the height it says.
   for (let peer = pool.peers.head(); peer; peer = peer.next) {
-    if (peer.handshake) {
+    if (!peer.handshake)
+      continue;
+    if (!peer.rtc) {
       peers += 1;
       best = Math.max(best, peer.height);
+    } else if (peer.blockRange && peer.blockRange.high >= 0) {
+      peers += 1;
+      best = Math.max(best, peer.blockRange.high);
     }
   }
 
@@ -1655,7 +1682,7 @@ function nodeTab() {
   const rows = [];
   for (let peer = pool.peers.head(); peer; peer = peer.next) {
     rows.push(el('li', {},
-      el('div', {class: 'mono small'}, peer.hostname()),
+      el('div', {class: 'mono small'}, peerName(peer)),
       el('div', {class: 'muted small'}, peer.handshake
         ? `${peer.agent}, ${peer === pool.peers.load ? 'syncing from' : 'open'}`
         : 'connecting')));
@@ -1715,7 +1742,7 @@ function wake() {
     peer.sendPing();
     setTimeout(() => {
       if (!peer.destroyed && peer.lastPong < asked) {
-        log(`No answer from ${peer.hostname()}: reconnecting.`);
+        log(`No answer from ${peerName(peer)}: reconnecting.`);
         peer.destroy();
       }
     }, WAKE_PING_MS);
