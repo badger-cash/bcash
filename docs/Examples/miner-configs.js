@@ -1,26 +1,40 @@
 'use strict';
 
-const bcoin = require('../..');
+const bcash = require('../..');
 
-const key = bcoin.wallet.WalletKey.generate('regtest');
+const key = bcash.KeyRing.generate();
 
-const workers = new bcoin.WorkerPool({
+const workers = new bcash.WorkerPool({
   enabled: true
 });
 
-const chain = new bcoin.Chain({
+const blocks = new bcash.blockstore.LevelBlockStore({
   network: 'regtest',
+  memory: true
+});
+
+const chain = new bcash.Chain({
+  network: 'regtest',
+  memory: true,
+  blocks: blocks,
   workers: workers
 });
 
-const miner = new bcoin.Miner({
+const miner = new bcash.Miner({
   chain: chain,
-  addresses: [key.getAddress()],
+  addresses: [key.getAddress('string', 'regtest')],
   coinbaseFlags: 'my-miner',
   workers: workers
 });
 
+// The worker processes don't keep Node.js running on their own (they are
+// unref'd), so hold the process open while a worker mines.
+const keepAlive = setInterval(() => {}, 1000);
+
 (async () => {
+  await workers.open();
+  await blocks.open();
+  await chain.open();
   await miner.open();
 
   const tmpl = await miner.createBlock();
@@ -39,6 +53,12 @@ const miner = new bcoin.Miner({
 
   console.log('New tip:');
   console.log(chain.tip);
+
+  await miner.close();
+  await chain.close();
+  await blocks.close();
+  await workers.close();
+  clearInterval(keepAlive);
 })().catch((err) => {
   console.error(err.stack);
   process.exit(1);

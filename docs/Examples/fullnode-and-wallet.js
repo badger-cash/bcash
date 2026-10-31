@@ -1,11 +1,9 @@
 'use strict';
-const bcoin = require('../..').set('main');
-const walletPlugin = bcoin.wallet.plugin;
+const bcash = require('../..').set('main');
+const walletPlugin = bcash.wallet.plugin;
 
-const node = new bcoin.FullNode({
+const node = new bcash.FullNode({
   checkpoints: true,
-  // Primary wallet passphrase
-  passsphrase: 'node',
   logLevel: 'info'
 });
 
@@ -18,8 +16,8 @@ node.on('error', (err) => {
   ;
 });
 
-// New Address we'll be sending to.
-const newReceiving = 'AddressHere';
+// New address we'll be sending to: put an ecash: address here.
+const newReceiving = 'ecash:...';
 
 // Start the node
 (async () => {
@@ -28,7 +26,6 @@ const newReceiving = 'AddressHere';
   const options = {
     id: 'mywallet',
     passphrase: 'foo',
-    witness: false,
     type: 'pubkeyhash'
   };
 
@@ -36,7 +33,8 @@ const newReceiving = 'AddressHere';
 
   const wallet = await walletdb.create(options);
 
-  console.log('Created wallet with address: %s', wallet.receiveAddress());
+  console.log('Created wallet with address: %s',
+    await wallet.receiveAddress());
 
   await node.connect();
 
@@ -51,7 +49,7 @@ const newReceiving = 'AddressHere';
       subtractFee: true,
       outputs: [{
         address: newReceiving,
-        value: balance.total
+        value: balance.unconfirmed
       }]
     };
 

@@ -218,6 +218,33 @@ describe('HTTP', function() {
     assert.strictEqual(info.n, 2);
   });
 
+  it('should get a block header by height and hash', async () => {
+    const tip = node.chain.tip;
+
+    const byHeight = await nclient.getBlockHeader(tip.height);
+    assert.deepStrictEqual(byHeight, {...tip.toJSON(), isFinal: false});
+
+    const byHash = await nclient.getBlockHeader(tip.rhash());
+    assert.deepStrictEqual(byHash, byHeight);
+
+    assert.strictEqual(await nclient.getBlockHeader(tip.height + 1), null);
+  });
+
+  it('should serve publicly with or without an API key', () => {
+    const create = options => new FullNode({
+      network: 'regtest',
+      memory: true,
+      workers: false,
+      listen: false,
+      httpHost: '0.0.0.0',
+      ...options
+    });
+
+    assert(create({}));
+    assert(create({apiKey: 'bar'}));
+    assert(create({noAuth: true}).http.options.noAuth);
+  });
+
   it('should get a block template', async () => {
     const json = await nclient.execute('getblocktemplate', []);
     assert.deepStrictEqual(json, {
@@ -244,7 +271,7 @@ describe('HTTP', function() {
         '0f9188f13cb7b2c71f2a335e3a4fc328bf5beb436012afca590b1a11466e2206'
         + '00000000',
       submitold: false,
-      coinbaseaux: { flags: '6d696e65642062792062636f696e' },
+      coinbaseaux: { flags: '6d696e6564206279206263617368' },
       coinbasevalue: 5000000000,
       // As Bitcoin ABC: no miner fund on regtest.
       coinbasetxn: {

@@ -1,8 +1,8 @@
 'use strict';
 
-const bcoin = require('../..');
+const bcash = require('../..');
 
-const node = new bcoin.FullNode({
+const node = new bcash.FullNode({
   memory: true,
   network: 'testnet',
   workers: true

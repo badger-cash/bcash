@@ -1,6 +1,6 @@
 'use strict';
 
-const bcoin = require('../..');
+const bcash = require('../..');
 
 function MyPlugin(node) {
   this.node = node;
@@ -26,7 +26,7 @@ MyPlugin.prototype.sayPeers = function sayPeers() {
   console.log('Number of peers: %d', this.node.pool.peers.size());
 };
 
-const node = new bcoin.FullNode({
+const node = new bcash.FullNode({
   memory: true,
   network: 'testnet',
   workers: true

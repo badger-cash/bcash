@@ -6,7 +6,7 @@ cmd='node'
 
 if ! type perl > /dev/null 2>& 1; then
   if uname | grep -i 'darwin' > /dev/null; then
-    echo 'Bcoin requires perl to start on OSX.' >& 2
+    echo 'bcash requires perl to start on macOS.' >& 2
     exit 1
   fi
   rl=1

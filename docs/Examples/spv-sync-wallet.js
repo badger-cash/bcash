@@ -1,25 +1,25 @@
 'use strict';
 
-const bcoin = require('../..');
+const bcash = require('../..');
 
-bcoin.set('testnet');
+bcash.set('testnet');
 
 // SPV chains only store the chain headers.
-const chain = new bcoin.Chain({
-  memory: false,
-  location: '/tmp/bcoin/spvchain',
+const chain = new bcash.Chain({
+  memory: true,
   spv: true
 });
 
-const pool = new bcoin.Pool({
+const pool = new bcash.Pool({
   chain: chain,
   spv: true,
-  maxPeers: 8
+  maxOutbound: 8
 });
 
-const walletdb = new bcoin.wallet.WalletDB({ memory: true });
+const walletdb = new bcash.wallet.WalletDB({ memory: true });
 
 (async () => {
+  await chain.open();
   await pool.open();
   await walletdb.open();
 
@@ -45,7 +45,8 @@ const walletdb = new bcoin.wallet.WalletDB({ memory: true });
 
   wallet.on('balance', (balance) => {
     console.log('Balance updated.');
-    console.log(bcoin.amount.btc(balance.unconfirmed));
+    // In XEC, which has 2 decimal places.
+    console.log(bcash.Amount.encode(balance.unconfirmed, 2));
   });
 })().catch((err) => {
   console.error(err.stack);

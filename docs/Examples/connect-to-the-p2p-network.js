@@ -1,36 +1,45 @@
 'use strict';
-const bcoin = require('../..').set('main');
+const bcash = require('../..').set('main');
 
 const Logger = require('blgr');
 
-// Setup logger to see what's Bcoin doing.
+// Setup logger to see what bcash is doing.
 const logger = new Logger({
   level: 'debug'
 });
 
-// Create a blockchain and store it in memory.
-const chain = new bcoin.Chain({
+// Create a blockchain and store it in memory, with its blocks.
+const blocks = new bcash.blockstore.LevelBlockStore({
   memory: true,
   network: 'main',
   logger: logger
 });
 
-const mempool = new bcoin.Mempool({
+const chain = new bcash.Chain({
+  memory: true,
+  network: 'main',
+  blocks: blocks,
+  logger: logger
+});
+
+const mempool = new bcash.Mempool({
   chain: chain,
   logger: logger
 });
 
 // Create a network pool of peers with a limit of 8 peers.
-const pool = new bcoin.Pool({
+const pool = new bcash.Pool({
   chain: chain,
   mempool: mempool,
-  maxPeers: 8,
+  maxOutbound: 8,
   logger: logger
 });
 
 (async function() {
   await logger.open();
+  await blocks.open();
   await chain.open();
+  await mempool.open();
 
   await pool.open();
 
@@ -53,35 +62,47 @@ const pool = new bcoin.Pool({
 
   pool.on('tx', (tx) => {
     console.log('Saw transaction:');
-    console.log(tx.rhash);
+    console.log(tx.txid());
   });
-})();
+})().catch((err) => {
+  console.error(err.stack);
+  process.exit(1);
+});
 
 // Start up a testnet sync in-memory
 // while we're at it (because we can).
 
-const tchain = new bcoin.Chain({
+const tblocks = new bcash.blockstore.LevelBlockStore({
   memory: true,
   network: 'testnet',
   logger: logger
 });
 
-const tmempool = new bcoin.Mempool({
+const tchain = new bcash.Chain({
+  memory: true,
+  network: 'testnet',
+  blocks: tblocks,
+  logger: logger
+});
+
+const tmempool = new bcash.Mempool({
   network: 'testnet',
   chain: tchain,
   logger: logger
 });
 
-const tpool = new bcoin.Pool({
+const tpool = new bcash.Pool({
   network: 'testnet',
   chain: tchain,
   mempool: tmempool,
-  size: 8,
+  maxOutbound: 8,
   logger: logger
 });
 
 (async function() {
+  await tblocks.open();
   await tchain.open();
+  await tmempool.open();
 
   await tpool.open();
 

@@ -2,18 +2,21 @@
 
 /* eslint new-cap: "off" */
 
-const bcoin = require('../..');
+const bcash = require('../..');
 const assert = require('assert');
 
 (async () => {
-  const master = bcoin.hd.generate();
-  const key = master.derivePath('m/44/0/0/0/0');
-  const keyring = new bcoin.wallet.WalletKey(key.privateKey);
-  const cb = new bcoin.MTX();
+  const master = bcash.hd.generate();
+  // Cashtab's derivation path for eCash.
+  const key = master.derivePath('m/44\'/1899\'/0\'/0/0');
+  const keyring = bcash.KeyRing.fromPrivate(key.privateKey);
+
+  console.log('Address: %s', keyring.getAddress('string'));
+  const cb = new bcash.MTX();
 
   cb.addInput({
-    prevout: new bcoin.Outpoint(),
-    script: new bcoin.Script(),
+    prevout: new bcash.Outpoint(),
+    script: new bcash.Script(),
     sequence: 0xffffffff
   });
 
@@ -29,11 +32,11 @@ const assert = require('assert');
   // Convert the coinbase output to a Coin
   // object and add it to our available coins.
   // In reality you might get these coins from a wallet.
-  const coin = bcoin.Coin.fromTX(cb, 0, -1);
+  const coin = bcash.Coin.fromTX(cb, 0, -1);
   coins.push(coin);
 
   // Create our redeeming transaction.
-  const mtx = new bcoin.MTX();
+  const mtx = new bcash.MTX();
 
   // Send 10,000 satoshis to ourself.
   mtx.addOutput({
@@ -48,11 +51,12 @@ const assert = require('assert');
   // Select coins from our array and add inputs.
   // Calculate fee and add a change output.
   await mtx.fund(coins, {
-    // Use a rate of 10,000 satoshis per kb.
+    // Use a rate of 1,000 satoshis per kB (1 satoshi
+    // per byte), the relay minimum on eCash.
     // With the `fullnode` object, you can
     // use the fee estimator for this instead
     // of blindly guessing.
-    rate: 10000,
+    rate: 1000,
     // Send the change back to ourselves.
     changeAddress: keyring.getAddress()
   });
