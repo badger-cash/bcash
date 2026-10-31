@@ -230,7 +230,7 @@ describe('HTTP', function() {
     assert.strictEqual(await nclient.getBlockHeader(tip.height + 1), null);
   });
 
-  it('should refuse to serve publicly without an API key', () => {
+  it('should serve publicly with or without an API key', () => {
     const create = options => new FullNode({
       network: 'regtest',
       memory: true,
@@ -240,9 +240,9 @@ describe('HTTP', function() {
       ...options
     });
 
-    assert.throws(() => create({}), /needs an API key/);
+    assert(create({}));
     assert(create({apiKey: 'bar'}));
-    assert(create({noAuth: true}));
+    assert(create({noAuth: true}).http.options.noAuth);
   });
 
   it('should get a block template', async () => {

@@ -167,9 +167,14 @@ By default, the node's HTTP server listens only on `127.0.0.1`, at the
 network's HTTP port (8332 on mainnet). On `127.0.0.1` or `::1`, with no API
 key set, no authentication is required.
 
-On any other host, authentication is required, so set `--api-key` when you
-listen on another host: without it, bcash refuses to start. (`--no-auth`
-turns authentication off entirely, which is unsafe on a public address.)
+On any other host, choose one of two ways to serve:
+
+- With `--api-key`, every request must carry the key.
+- With `--no-auth`, anyone can use the node's HTTP API without a key. This is
+  how a fully public node is run, such as `ecash.badger.cash:8332`.
+
+If you set neither, bcash makes up a random key and does not show it anywhere,
+so every request is refused.
 
 The wallet's HTTP server follows the same rules on its own port. Its options
 take a `wallet-` prefix (for example `--wallet-http-host`), and it uses the

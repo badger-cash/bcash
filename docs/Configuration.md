@@ -367,10 +367,12 @@ These configure the node's HTTP and JSON-RPC server.
   prefix).
 - `ssl-key`: Path to the SSL key (default: `key.pem` in the prefix).
 - `api-key`: API key for all node APIs. It may differ from the wallet's.
-  It's required when `http-host` is not 127.0.0.1 or ::1, unless `no-auth`
-  is set: without either, the node refuses to start.
-- `no-auth`: Disable API key authentication (default: false, but true when
-  no `api-key` is set and `http-host` is 127.0.0.1 or ::1).
+  If it isn't set, the node makes a random one at each start and doesn't
+  show it, so on a host other than 127.0.0.1 or ::1 set either this or
+  `no-auth`.
+- `no-auth`: Disable API key authentication, to serve a fully public node
+  (default: false, but true when no `api-key` is set and `http-host` is
+  127.0.0.1 or ::1).
 - `cors`: Enable "Cross-Origin Resource Sharing" HTTP headers (default:
   false).
 
@@ -416,8 +418,8 @@ It reads `wallet.conf`, and takes the same options without the prefix.
 - `ssl-key`: Path to the SSL key.
 - `ssl-cert`: Path to the SSL certificate.
 - `api-key`: API key for all wallet APIs (default: the node's `api-key`).
-  It may differ from the node's. As for the node, it's required when
-  `http-host` is not 127.0.0.1 or ::1, unless `no-auth` is set.
+  It may differ from the node's. As for the node, without it or `no-auth`
+  a random key is made and every request is refused.
 - `no-auth`: Disable API key authentication (default: false, but true when
   no API key is set and `http-host` is 127.0.0.1 or ::1).
 - `cors`: Enable "Cross-Origin Resource Sharing" HTTP headers (default:
