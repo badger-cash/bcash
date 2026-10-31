@@ -14,6 +14,7 @@ const assert = require('bsert');
 const {randomBytes} = require('crypto');
 const {BloomFilter} = require('bfilter');
 const Chain = require('../lib/blockchain/chain');
+const NetAddress = require('../lib/net/netaddress');
 const Pool = require('../lib/net/pool');
 const Peer = require('../lib/net/peer');
 const packets = require('../lib/net/packets');
@@ -99,8 +100,16 @@ describe('Pool#scanRange', function() {
       this.address = addr;
     };
     Peer.prototype.open = async function() {
-      if (behaviour(this) === 'refuse')
+      const how = behaviour(this);
+      if (how === 'refuse')
         throw new Error('connection refused');
+      // As a full node serving filters says, unless one that does not.
+      this.services = how === 'nobloom'
+        ? common.services.NETWORK
+        : common.services.NETWORK | common.services.BLOOM;
+      this.agent = how === 'abc-full'
+        ? '/Bitcoin ABC:0.33.6(EB32.0)/'
+        : '/Bitcoin ABC:0.34.1(EB32.0)/';
     };
     Peer.prototype.sendFilterLoad = function(filter) {
       this.scanFilter = filter;
@@ -200,7 +209,22 @@ describe('Pool#scanRange', function() {
     });
 
     assert.deepStrictEqual(seen, expected());
-    assert(served.every(h => h === '10.0.0.4' || h === '10.0.0.2'));
+    // The silent and the full-block peer served nothing kept.
+    assert(served.every(h => h !== '10.0.0.1' && h !== '10.0.0.3'));
+  });
+
+  it('asks no peer known to send full blocks for filtered ones', async () => {
+    // Bitcoin ABC 0.32.4 to 0.33.10 would: left before any request, as is
+    // a peer serving no filters.
+    const hosts = {'10.0.0.1': 'abc-full', '10.0.0.2': 'nobloom'};
+    behaviour = peer => hosts[peer.address.host] || 'serve';
+    const pool = poolWith(['10.0.0.1:18444', '10.0.0.2:18444',
+      '10.0.0.3:18444']);
+    const seen = await scan(pool, {filter: filterFor(watched), batch: 4});
+
+    assert.deepStrictEqual(seen, expected());
+    assert(served.length > 0);
+    assert(served.every(h => h !== '10.0.0.1' && h !== '10.0.0.2'));
   });
 
   it('fails when no peer can serve the range', async () => {
@@ -242,8 +266,74 @@ describe('Pool#directHosts', function() {
       nodes: ['10.0.0.1:18444', '10.0.0.2:18444', '10.0.0.1:18444']
     });
     const hosts = await pool.directHosts();
+    // The nodes first, then the table (regtest's seed, 127.0.0.1).
     assert.deepStrictEqual(hosts.map(a => a.hostname),
-      ['10.0.0.1:18444', '10.0.0.2:18444']);
+      ['10.0.0.1:18444', '10.0.0.2:18444', '127.0.0.1:48444']);
+  });
+
+  it('adds the table\'s hosts, those that answered and serve filters first',
+    async () => {
+    const chain = new Chain({network, memory: true, spv: true});
+    const pool = new Pool({network, chain, spv: true, memory: true,
+      listen: false, nodes: ['10.0.0.9:18444']});
+    // Only the hosts added here in the table: not regtest's seed.
+    pool.hosts.remove('127.0.0.1:48444');
+
+    const {NETWORK, BLOOM} = common.services;
+    const add = (hostname, services, success) => {
+      const addr = NetAddress.fromHostname(hostname, network);
+      addr.services = services;
+      addr.time = 1700000000;
+      pool.hosts.add(addr);
+      if (success)
+        pool.hosts.markAck(addr.hostname, services);
+      return addr;
+    };
+    add('10.0.1.1:18444', NETWORK, false);
+    add('10.0.1.2:18444', NETWORK | BLOOM, false);
+    add('10.0.1.3:18444', NETWORK, true);
+    add('10.0.1.4:18444', common.services.NETWORK_LIMITED | BLOOM, false);
+    add('10.0.1.5:18444', NETWORK | BLOOM, false);
+    pool.hosts.ban('10.0.1.5');
+
+    const hosts = (await pool.directHosts()).map(a => a.hostname);
+    // The node; then the table: answered before, then serving filters;
+    // never one not serving the full chain, nor a banned one.
+    assert.deepStrictEqual(hosts.slice(0, 3),
+      ['10.0.0.9:18444', '10.0.1.3:18444', '10.0.1.2:18444']);
+    assert(hosts.includes('10.0.1.1:18444'));
+    assert(!hosts.includes('10.0.1.4:18444'));
+    assert(!hosts.includes('10.0.1.5:18444'));
+  });
+
+  it('keeps to the hosts `only` names', async () => {
+    const chain = new Chain({network, memory: true, spv: true});
+    const pool = new Pool({network, chain, spv: true, memory: true,
+      listen: false, only: ['10.0.0.1:18444']});
+    const hosts = await pool.directHosts();
+    assert.deepStrictEqual(hosts.map(a => a.hostname), ['10.0.0.1:18444']);
+  });
+
+  it('asks the seeds again when a lookup comes back empty', async () => {
+    this.timeout(10000);
+    const chain = new Chain({network, memory: true, spv: true});
+    const pool = new Pool({network, chain, spv: true, memory: true,
+      listen: false});
+
+    // The first lookup fails, the second answers.
+    let lookups = 0;
+    pool.hosts.dnsSeeds = ['seed.example'];
+    pool.hosts.populate = async () => {
+      lookups += 1;
+      return lookups < 2
+        ? []
+        : [NetAddress.fromHostname('10.0.0.3:18444', network)];
+    };
+
+    const hosts = await pool.directHosts();
+    assert.strictEqual(lookups, 2);
+    assert.deepStrictEqual(hosts.map(a => a.hostname),
+      ['10.0.0.3:18444', '127.0.0.1:48444']);
   });
 });
 
@@ -365,7 +455,8 @@ describe('Pool#scanRange with full blocks', function() {
     const hosts = {'10.0.0.1': 'pruned'};
     behaviour = peer => hosts[peer.address.host] || 'serve';
     await scan(poolWith(['10.0.0.1:18444', '10.0.0.2:18444']));
-    assert(requested.every(([host]) => host === '10.0.0.2'));
+    assert(requested.length > 0);
+    assert(requested.every(([host]) => host !== '10.0.0.1'));
   });
 
   it('fetches the next block to deliver when full', async function() {

@@ -1,110 +1,657 @@
 <!DOCTYPE html>
 <html lang="en">
   <head>
-    <title>bcoin</title>
     <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>bcash wallet</title>
+    <meta name="description" content="An eCash wallet in your browser. No server holds your keys or sees your addresses.">
+    <link rel="icon" href="favicon.ico" sizes="16x16 32x32 48x48">
+    <link rel="apple-touch-icon" href="apple-touch-icon.png">
+    <!-- Link previews on social sites. They need the image's full URL:
+         change it if you host the page elsewhere. -->
+    <meta property="og:type" content="website">
+    <meta property="og:title" content="bcash wallet">
+    <meta property="og:description" content="An eCash wallet in your browser. No server holds your keys or sees your addresses.">
+    <meta property="og:image" content="https://webnode.badger.cash/share-card.jpg">
+    <meta property="og:image:width" content="1200">
+    <meta property="og:image:height" content="630">
+    <meta property="og:image:alt" content="bcash wallet: an eCash wallet in your browser">
+    <meta name="twitter:card" content="summary_large_image">
     <style>
+      :root {
+        --bg: #0d0f14;
+        --card: #171a22;
+        --line: #262b37;
+        --fg: #eef0f5;
+        --muted: #8a91a3;
+        --accent: #00abe7;
+        --accent-fg: #00121a;
+        --in: #3ccf8e;
+        --out: #eef0f5;
+        --warn: #f0a33c;
+        --err: #ff6b6b;
+        color-scheme: dark;
+      }
+      @media (prefers-color-scheme: light) {
+        :root {
+          --bg: #f3f5f9;
+          --card: #ffffff;
+          --line: #e1e5ee;
+          --fg: #121620;
+          --muted: #616a7d;
+          --accent: #0088c2;
+          --accent-fg: #ffffff;
+          --in: #11935c;
+          --out: #121620;
+          --warn: #b46a00;
+          --err: #c62828;
+          color-scheme: light;
+        }
+      }
+      * {
+        box-sizing: border-box;
+      }
       html {
-        height: 100%;
+        /* The scrollbar's room kept on every tab: a tab long enough to
+           scroll must not move the page sideways. */
+        scrollbar-gutter: stable;
       }
       body {
-        height: 90%;
-        padding: 20px;
+        margin: 0;
+        background: var(--bg);
+        color: var(--fg);
+        font: 15px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+      }
+      #app {
+        max-width: 520px;
+        margin: 0 auto;
+        padding: 16px;
       }
       h1 {
-        font: 3em monospace;
-        margin: 10px;
-        padding: 0;
+        font-size: 1.5em;
+        margin: 0 0 8px;
       }
-      small {
-        margin: 10px;
-        width: 50%;
-        display: block;
+      h2 {
+        font-size: 1.05em;
+        margin: 16px 0 8px;
       }
-      .log {
-        padding: 5px;
-        margin-left: 10px;
-        overflow-y: scroll;
-        border: 1px solid black;
-        white-space: pre-wrap;
-        height: 40%;
-        width: 40%;
-        font: 1em monospace;
-        margin-top: 10px;
-      }
-      .wallet {
-        padding: 5px;
-        margin-left: 5px;
-        margin-top: 10px;
-        font: 1em monospace;
-      }
-      .rpc, .send {
-        padding: 5px;
-        margin-left: 5px;
-        margin-top: 10px;
-        font: 1em monospace;
-      }
-      #newaddr{
-        display: block;
-        margin-left: 10px;
-      }
-      .tx {
-        float: right;
-        font: 1em monospace;
-        padding: 5px;
-        border: 1px solid black;
-        margin-top: 10px;
+      p {
+        margin: 8px 0;
       }
       a {
+        color: var(--accent);
         text-decoration: none;
       }
-      .floating {
-        font: 1em monospace;
-        white-space: pre-wrap;
+      hr {
+        border: 0;
+        border-top: 1px solid var(--line);
+        margin: 16px 0;
+      }
+      .muted {
+        color: var(--muted);
+      }
+      .small {
+        font-size: 0.85em;
+      }
+      .mono {
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        overflow-wrap: anywhere;
+      }
+      .error {
+        color: var(--err);
+      }
+      .warn {
+        color: var(--warn);
+      }
+      .card {
+        background: var(--card);
+        border: 1px solid var(--line);
+        border-radius: 14px;
+        padding: 16px;
+        margin: 12px 0;
+      }
+      .narrow {
+        max-width: 420px;
+        margin: 10vh auto 0;
+      }
+      .center {
+        text-align: center;
+      }
+      label {
+        display: block;
+        margin: 12px 0 4px;
+        color: var(--muted);
+        font-size: 0.9em;
+      }
+      input, textarea, select {
+        width: 100%;
+        padding: 10px 12px;
+        border-radius: 10px;
+        border: 1px solid var(--line);
+        background: var(--bg);
+        color: var(--fg);
+        font: inherit;
+      }
+      input:focus, textarea:focus, select:focus {
+        outline: 2px solid var(--accent);
+        outline-offset: -1px;
+      }
+      textarea {
+        resize: vertical;
+      }
+      button {
+        margin: 12px 8px 0 0;
+        padding: 10px 16px;
+        border-radius: 10px;
+        border: 1px solid var(--line);
+        background: var(--card);
+        color: var(--fg);
+        font: inherit;
+        cursor: pointer;
+      }
+      button:hover {
+        border-color: var(--accent);
+      }
+      button.primary {
+        width: 100%;
+        margin-right: 0;
+        background: var(--accent);
+        border-color: var(--accent);
+        color: var(--accent-fg);
+        font-weight: 600;
+      }
+      button.danger {
+        border-color: var(--err);
+        color: var(--err);
+      }
+      .row {
+        display: flex;
+        gap: 8px;
+        align-items: flex-end;
+      }
+      .row > * {
+        flex: 1;
+        min-width: 0;
+      }
+      .row > button {
+        flex: 0 0 auto;
+        margin-top: 0;
+        margin-right: 0;
+      }
+      /* Beside another button, the main one takes the room left. */
+      .row > button.primary {
+        flex: 1;
+        width: auto;
+      }
+      dl + .row, dl + .error {
+        margin-top: 16px;
+      }
+      .icon-button {
+        width: 46px;
+        height: 46px;
+        padding: 0;
+        display: grid;
+        place-items: center;
+      }
+      details {
+        margin-top: 20px;
+      }
+      summary {
+        cursor: pointer;
+        color: var(--muted);
+      }
+      header {
+        display: flex;
+        gap: 10px;
+        align-items: center;
+      }
+      .spacer {
+        flex: 1;
+      }
+      .menu {
+        position: relative;
+      }
+      .menu-button {
+        margin: 0;
+        min-height: 36px;
+        padding: 6px 12px;
+        border-radius: 8px;
+        border-color: transparent;
+        background: none;
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+      }
+      .menu-button:hover, .menu-button[aria-expanded="true"] {
+        border-color: var(--line);
+        background: var(--card);
+      }
+      .menu-button:disabled {
+        opacity: 0.6;
+        cursor: wait;
+      }
+      .caret {
+        font-size: 0.75em;
+        color: var(--muted);
+      }
+      .network-menu .menu-button {
+        font-size: 0.75em;
+        font-weight: 600;
+        letter-spacing: 0.06em;
+        color: var(--muted);
+      }
+      .menu-list {
         position: absolute;
-        display: none;
-        padding: 5px;
-        background: white;
-        border: 1px solid black;
-        width: 40%;
-        height: 30%;
-        top: 50%;
+        top: calc(100% + 4px);
+        left: 0;
+        z-index: 10;
+        min-width: 180px;
+        padding: 4px;
+        background: var(--card);
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
+      }
+      .menu-list li {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        min-height: 40px;
+        padding: 8px 12px;
+        border-radius: 6px;
+        cursor: pointer;
+        white-space: nowrap;
+      }
+      .menu-list li:hover {
+        background: var(--bg);
+      }
+      .menu-list li.selected {
+        color: var(--accent);
+      }
+      .menu-list .check {
+        margin-left: auto;
+      }
+      .key-menu {
+        display: inline-block;
+      }
+      .key-menu .menu-list {
         left: 50%;
-        margin-left: -20%;
-        margin-top: -15%;
-        overflow-y: scroll;
+        transform: translateX(-50%);
+        text-align: left;
+      }
+      .key-name, .key-menu .menu-button {
+        font-weight: 600;
+        color: var(--muted);
+      }
+      .key-name {
+        padding: 4px 8px;
+      }
+      .brand {
+        font-weight: 700;
+        font-size: 1.15em;
+      }
+      .brand span {
+        margin-left: 6px;
+        font-size: 0.65em;
+        font-weight: 500;
+        color: var(--muted);
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+      }
+      .chip {
+        margin: 0;
+        padding: 6px 10px;
+        border-radius: 999px;
+        font-size: 0.8em;
+        white-space: nowrap;
+      }
+      .chip.ok {
+        color: var(--in);
+      }
+      .chip.wait {
+        color: var(--warn);
+      }
+      .chip.bad {
+        color: var(--err);
+      }
+      .balance {
+        text-align: center;
+        padding: 28px 0 16px;
+      }
+      .balance .amount {
+        font-size: 2.4em;
+        font-weight: 700;
+        letter-spacing: -0.02em;
+        overflow-wrap: anywhere;
+      }
+      .balance .amount span {
+        font-size: 0.45em;
+        font-weight: 500;
+        color: var(--muted);
+      }
+      .one-line-notice {
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .notice.warn {
+        border-left-color: var(--warn);
+      }
+      .notice {
+        background: var(--card);
+        border-left: 3px solid var(--accent);
+        padding: 8px 12px;
+        border-radius: 6px;
+        font-size: 0.9em;
+      }
+      nav {
+        display: flex;
+        gap: 4px;
+        border-bottom: 1px solid var(--line);
+        margin: 8px 0 4px;
+        overflow-x: auto;
+      }
+      nav button {
+        margin: 0;
+        border: 0;
+        border-bottom: 2px solid transparent;
+        border-radius: 0;
+        background: none;
+        color: var(--muted);
+        padding: 10px 12px;
+      }
+      /* Six tabs on a phone's width. */
+      @media (max-width: 460px) {
+        nav {
+          gap: 0;
+        }
+        nav button {
+          padding: 10px 7px;
+          font-size: 0.92em;
+        }
+      }
+      nav button.active {
+        color: var(--fg);
+        border-bottom-color: var(--accent);
+      }
+      ul {
+        list-style: none;
+        padding: 0;
+        margin: 0;
+      }
+      .history li, .keys li, .peers li {
+        display: flex;
+        gap: 12px;
+        align-items: center;
+        padding: 12px 0;
+        border-bottom: 1px solid var(--line);
+      }
+      .peers li {
+        display: block;
+      }
+      .icon {
+        flex: 0 0 36px;
+        height: 36px;
+        border-radius: 50%;
+        display: grid;
+        place-items: center;
+        background: var(--card);
+        border: 1px solid var(--line);
+        font-weight: 700;
+      }
+      .icon.in {
+        color: var(--in);
+      }
+      .what {
+        flex: 1;
+        min-width: 0;
+      }
+      .value {
+        font-weight: 600;
+        white-space: nowrap;
+      }
+      .value.in {
+        color: var(--in);
+      }
+      .right {
+        text-align: right;
+      }
+      .tag {
+        margin-left: 6px;
+        padding: 1px 6px;
+        border-radius: 6px;
+        border: 1px solid var(--line);
+        font-size: 0.75em;
+        color: var(--muted);
+      }
+      .tag.warn {
+        border-color: var(--warn);
+        color: var(--warn);
+      }
+      .actions {
+        display: flex;
+        flex-direction: column;
+      }
+      .scan-from {
+        margin-top: 6px;
+      }
+      .scan-from input {
+        padding: 6px 10px;
+        font-size: 0.85em;
+      }
+      .scan-from button {
+        padding: 6px 10px;
+        font-size: 0.85em;
+      }
+      .actions button {
+        margin: 2px 0;
+        padding: 6px 10px;
+        font-size: 0.85em;
+      }
+      .empty {
+        text-align: center;
+        padding: 32px 0;
+      }
+      .qr {
+        width: min(260px, 70vw);
+        margin: 8px auto;
+        background: #fff;
+        border-radius: 12px;
+        padding: 8px;
+      }
+      .qr svg {
+        display: block;
+        width: 100%;
+        height: auto;
+      }
+      .address {
+        font-size: 0.95em;
+      }
+      dl {
+        display: grid;
+        grid-template-columns: max-content 1fr;
+        gap: 6px 16px;
+        margin: 0;
+      }
+      dt {
+        color: var(--muted);
+      }
+      dd {
+        margin: 0;
+        overflow-wrap: anywhere;
+      }
+      /* A label over its own full-width line. */
+      dt.full {
+        grid-column: 1 / -1;
+      }
+      dt.full + dd {
+        grid-column: 1 / -1;
+        margin-bottom: 6px;
+      }
+      /* An address on one line: its font fits the width, to a phone's. */
+      .one-line {
+        white-space: nowrap;
+        overflow-wrap: normal;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        font-size: clamp(8.5px, 2.4vw, 14px);
+      }
+      a.txid {
+        display: block;
+        margin: 8px 0;
+        overflow-wrap: anywhere;
+      }
+      .spinner {
+        width: 36px;
+        height: 36px;
+        margin: 8px auto;
+        border: 3px solid var(--line);
+        border-top-color: var(--accent);
+        border-radius: 50%;
+        animation: spin 0.9s linear infinite;
+      }
+      @keyframes spin {
+        to {
+          transform: rotate(360deg);
+        }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .spinner {
+          animation-duration: 3s;
+        }
+      }
+      .words {
+        columns: 2;
+        padding-left: 28px;
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      }
+      .words li {
+        list-style: decimal;
+        padding: 2px 0;
+      }
+      .modal {
+        position: fixed;
+        inset: 0;
+        background: rgba(0, 0, 0, 0.6);
+        display: grid;
+        place-items: start center;
+        padding: 16px;
+        overflow-y: auto;
+      }
+      .modal .card {
+        width: 100%;
+      }
+      .viewfinder {
+        position: relative;
+        margin: 8px auto;
+        width: min(360px, 80vw);
+        aspect-ratio: 1;
+        overflow: hidden;
+        border-radius: 12px;
+        background: #000;
+      }
+      .viewfinder video {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+      }
+      .viewfinder::after {
+        content: "";
+        position: absolute;
+        inset: 18%;
+        border: 2px solid rgba(255, 255, 255, 0.8);
+        border-radius: 10px;
+      }
+      .log {
+        background: var(--card);
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        padding: 8px;
+        font-size: 0.8em;
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+        max-height: 50vh;
+        overflow-y: auto;
+      }
+      .log .err {
+        color: var(--err);
+      }
+      /* Shown while the wallet's script loads; the wallet replaces it. */
+      .splash {
+        min-height: 80vh;
+        display: grid;
+        place-items: center;
+        align-content: center;
+        gap: 18px;
+        animation: splash-in 0.4s ease-out both;
+      }
+      .splash-mark {
+        font-size: 2.6em;
+        font-weight: 700;
+        letter-spacing: -0.02em;
+        background: linear-gradient(90deg, var(--fg) 0%, var(--fg) 40%,
+          var(--accent) 50%, var(--fg) 60%, var(--fg) 100%);
+        background-size: 250% 100%;
+        -webkit-background-clip: text;
+        background-clip: text;
+        color: transparent;
+        animation: splash-shine 2s linear infinite;
+      }
+      .splash-bar {
+        position: relative;
+        width: 120px;
+        height: 3px;
+        border-radius: 3px;
+        overflow: hidden;
+        background: var(--line);
+      }
+      .splash-bar::after {
+        content: "";
+        position: absolute;
+        inset: 0;
+        width: 40%;
+        border-radius: 3px;
+        background: var(--accent);
+        animation: splash-slide 1.2s ease-in-out infinite;
+      }
+      @keyframes splash-in {
+        from {
+          opacity: 0;
+          transform: translateY(6px);
+        }
+      }
+      @keyframes splash-shine {
+        from {
+          background-position: 100% 0;
+        }
+        to {
+          background-position: -150% 0;
+        }
+      }
+      @keyframes splash-slide {
+        from {
+          transform: translateX(-100%);
+        }
+        to {
+          transform: translateX(250%);
+        }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .splash, .splash-mark, .splash-bar::after {
+          animation-duration: 0s;
+          animation-iteration-count: 1;
+        }
       }
     </style>
-    <script src="app.js" defer></script>
   </head>
   <body>
-    <h1>Bcoin, the browser full node</h1>
-    <small>
-      Welcome. Your machine is currently validating the blockchain. The blocks
-      and wallet are stored on your local disk with indexed DB. You are
-      connecting to the actual bitcoin P2P network via a websocket-&gt;tcp
-      proxy. Enjoy. (See the
-      <a href="https://github.com/bcoin-org/bcoin"
-        target="_blank">bcoin repo</a>
-      for more bitcoin magic).
-    </small>
-    <div class="tx">
-      <div>Chain State: <span id="state"></span></div>
-      <div>Last 20 Blocks/TXs:</div>
-      <div id="tx"></div>
+    <div id="app">
+      <div class="splash" role="status" aria-label="Loading bcash">
+        <div class="splash-mark">bcash</div>
+        <div class="splash-bar"></div>
+        <noscript>The bcash wallet needs JavaScript.</noscript>
+      </div>
     </div>
-    <div id="log" class="log"></div>
-    <form id="rpc" class="rpc" action="#">
-      <input type="text" name="cmd" id="cmd"
-        placeholder="RPC command (e.g. getblockchaininfo)">
-    </form>
-    <div id="wallet" class="wallet"></div>
-    <form id="send" class="send" action="#">
-      <input type="text" name="address" id="address" placeholder="Address">
-      <input type="text" name="amount" id="amount" placeholder="Amount (BTC)">
-      <input type="submit" value="Send">
-    </form>
-    <input type="button" id="newaddr" value="New Address">
-    <div id="floating" class="floating"></div>
+    <script src="bcash-wallet.js"></script>
   </body>
 </html>

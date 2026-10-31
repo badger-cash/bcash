@@ -4,22 +4,25 @@
 'use strict';
 
 /*
- * An SPV pool requests only filtered blocks. A peer that answers with full
- * blocks must be dropped rather than kept as the sync loader, where it would
- * stall the sync (observed from a Bitcoin ABC 0.33.6 node answering a
- * 500-block filtered getdata with 500 full blocks).
+ * An SPV pool requests only filtered blocks. A full block it did not ask
+ * for gets the peer dropped. (One it asked for is filtered by the pool,
+ * as Bitcoin ABC 0.33.6 nodes answer a filtered getdata with full blocks:
+ * see pool-spv-fullblock-test.js.)
  */
 
 const assert = require('bsert');
+const {BufferMap} = require('buffer-map');
 const Chain = require('../lib/blockchain/chain');
 const Pool = require('../lib/net/pool');
 const Block = require('../lib/primitives/block');
 const Network = require('../lib/protocol/network');
+const Outpoint = require('../lib/primitives/outpoint');
 
 const network = Network.get('regtest');
 
 function fakePeer() {
   return {
+    blockMap: new BufferMap(),
     destroyed: false,
     hostname: () => '127.0.0.1:18444',
     destroy() {
@@ -41,7 +44,7 @@ describe('Pool (SPV)', function() {
     await chain.close();
   });
 
-  it('drops a peer that sends a full block', async () => {
+  it('drops a peer that sends a full block not asked for', async () => {
     const peer = fakePeer();
     const block = Block.fromRaw(network.genesisBlock, 'hex');
 
@@ -65,4 +68,31 @@ describe('Pool (SPV)', function() {
 
     assert.strictEqual(chain.height, height);
   });
+
+  it('adds a watched item to loaded filters alone', async () => {
+    // One peer with the filter loaded, one still opening.
+    const sent = [[], []];
+    const loaded = {spvFilterLoaded: true, send: p => sent[0].push(p)};
+    const opening = {spvFilterLoaded: false, send: p => sent[1].push(p)};
+    loaded.next = opening;
+    opening.next = null;
+
+    const head = pool.peers.head;
+    pool.peers.head = () => loaded;
+    try {
+      const outpoint = new Outpoint(Buffer.alloc(32, 1), 0);
+      pool.watchOutpoint(outpoint);
+
+      assert.deepStrictEqual(sent[0].map(p => p.cmd), ['filteradd']);
+      assert.bufferEqual(sent[0][0].data, outpoint.toRaw());
+      assert.strictEqual(sent[1].length, 0);
+      assert(pool.spvFilter.test(outpoint.toRaw()));
+
+      // No resend of the whole filter.
+      assert.strictEqual(pool.pendingFilter, null);
+    } finally {
+      pool.peers.head = head;
+    }
+  });
 });
+

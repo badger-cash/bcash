@@ -22,10 +22,15 @@ const fixtures = require('./data/testnet-asert-headers');
 
 const testnet = Network.get('testnet');
 
-const toBlock = hex => Block.fromRaw(Buffer.concat([Buffer.from(hex, 'hex'), Buffer.from([0])]));
+const toBlock = hex => Block.fromRaw(Buffer.concat([Buffer.from(hex, 'hex'),
+  Buffer.from([0])]));
 const rhash = buf => Buffer.from(buf).reverse().toString('hex');
 
-/** Anchor an SPV testnet chain on a window's first 12 headers. */
+/**
+ * Anchor an SPV testnet chain on a window's first 12 headers.
+ * @param {Object} window - {start, headers}.
+ * @returns {Promise} - Returns {@link Chain}.
+ */
 async function openAnchored(window) {
   const chain = new Chain({
     network: testnet, memory: true, spv: true,
@@ -38,7 +43,12 @@ async function openAnchored(window) {
   return chain;
 }
 
-/** Add the rest of a window's headers; returns the first failure, if any. */
+/**
+ * Add the rest of a window's headers.
+ * @param {Chain} chain - From openAnchored.
+ * @param {Object} window - {start, headers}.
+ * @returns {Promise} - Returns the first failure, if any.
+ */
 async function addRest(chain, window) {
   for (let i = 12; i < window.headers.length; i++) {
     const [hash, header] = window.headers[i];
@@ -72,10 +82,14 @@ describe('Testnet parameters', function() {
     it('carries the ABC activation checkpoints', () => {
       const map = networks.testnet.checkpointMap;
       const expect = {
-        1421481: '00000000062c7f32591d883c99fc89ebe74a83287c0f2b7ffeef72e62217d40b',
-        1450540: '00000000001085419e7328a2bacaf6216dd913c400f0b7da4bde43a8ebf6ed4e',
-        1477500: '000000000004057554e6f83253e3080774c37ae8a940ffbc38d77525274709ae',
-        1503557: '00000000000dbd764814fb67b5ff5aab606faa1f5881dc86f57639a1396e11ba'
+        1421481: '00000000062c7f32591d883c99fc89ebe74a83287c0f2b7ffeef72e6221' +
+          '7d40b',
+        1450540: '00000000001085419e7328a2bacaf6216dd913c400f0b7da4bde43a8ebf' +
+          '6ed4e',
+        1477500: '000000000004057554e6f83253e3080774c37ae8a940ffbc38d77525274' +
+          '709ae',
+        1503557: '00000000000dbd764814fb67b5ff5aab606faa1f5881dc86f57639a1396' +
+          'e11ba'
       };
       for (const [height, hash] of Object.entries(expect))
         assert.strictEqual(rhash(map[height]), hash, `checkpoint ${height}`);
@@ -113,12 +127,14 @@ describe('Testnet parameters', function() {
   });
 
   describe('real testnet headers', function() {
-    it('validates the first ASERT blocks, which clamp to the pow limit', async () => {
+    it('validates the first ASERT blocks, which clamp to the pow limit',
+      async () => {
       const chain = await openAnchored(fixtures.asert);
       const anchor = chain.tip;
       assert.strictEqual(anchor.height, 1421481);
       const first = toBlock(fixtures.asert.headers[12][1]);
-      assert.strictEqual(await chain.getTarget(first.time, anchor), testnet.pow.bits);
+      assert.strictEqual(await chain.getTarget(first.time, anchor),
+        testnet.pow.bits);
       await addRest(chain, fixtures.asert);
       await chain.close();
     });
@@ -129,13 +145,15 @@ describe('Testnet parameters', function() {
       await chain.close();
     });
 
-    it('rejects the first ASERT block if the mainnet anchor is used', async () => {
+    it('rejects the first ASERT block if the mainnet anchor is used',
+      async () => {
       const saved = testnet.pow.asertAnchor;
       delete testnet.pow.asertAnchor;
       try {
         const chain = await openAnchored(fixtures.asert);
         const block = toBlock(fixtures.asert.headers[12][1]);
-        await assert.rejects(chain.add(block, common.flags.VERIFY_POW), /bad-diffbits/);
+        await assert.rejects(chain.add(block, common.flags.VERIFY_POW),
+          /bad-diffbits/);
         await chain.close();
       } finally {
         testnet.pow.asertAnchor = saved;

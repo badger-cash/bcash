@@ -15,7 +15,6 @@ const Address = require('../lib/primitives/address');
 const Peer = require('../lib/net/peer');
 const InvItem = require('../lib/primitives/invitem');
 const invTypes = InvItem.types;
-const util = require('../lib/utils/util');
 
 const node = new FullNode({
   memory: true,
@@ -32,7 +31,6 @@ const node = new FullNode({
 
 const chain = node.chain;
 const miner = node.miner;
-const network = node.network;
 const {wdb} = node.require('walletdb');
 
 // May 15th hardfork update

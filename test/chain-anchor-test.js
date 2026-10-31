@@ -21,26 +21,41 @@ const Block = require('../lib/primitives/block');
 const Network = require('../lib/protocol/network');
 const consensus = require('../lib/protocol/consensus');
 const common = require('../lib/blockchain/common');
-const hash256 = require('bcrypto/lib/hash256');
 
 const network = Network.get('main');
 
 // Five consecutive eCash mainnet headers, 971519 to 971523.
 const MAINNET = [
-  { height: 971519, hash: '0000000000000000b0e2883a2f9b67ee69fabede4bc9ee025b6af49bff5e5d0a',
-    header: '00802f28ef1bdb388f1c1051f8996fb5b8316ac441d42918b800f06500000000000000000b9cd8d341dfea6171fc15279b474d6876061e51b7f324ab1cebcc40d3c27a116335d46a52c2001912931d85' },
-  { height: 971520, hash: '00000000000000002057dab2069b426562205b974723218b741a4ee28827fc54',
-    header: '0000f8310a5d5eff9bf46a5b02eec94bdebefa69ee679b2f3a88e2b0000000000000000043a8af6f56cdc1850dfb6a072ec9daf7ef5c52f87d466defcfa88b4665d760bcb237d46aedc2001929e8e23c' },
-  { height: 971521, hash: '000000000000000081f58601f03132902c488ae440bfd032f85215936b852be2',
-    header: '00402c2754fc2788e24e1a748b212347975b206265429b06b2da57200000000000000000a9c96f439b3a6a8d1f7bbcdb33b14781e68559534006c8a0689938f4551af5c69c39d46aecc200191782f70f' },
-  { height: 971522, hash: '000000000000000035265eb26ea436af88b59b40183141a73caf41a795a0f57d',
-    header: '00800236e22b856b931552f832d0bf40e48a482c903231f00186f5810000000000000000f39b52e4338a42060fcad58024d99a0477c5c0d75589d8d19ede7a6e798f5a61623dd46ad6c200193e8f85a4' },
-  { height: 971523, hash: '0000000000000000ac805f618b511645b8be7c0338c73d454e6bc1bd3265480e',
-    header: '00e012207df5a095a741af3ca7413118409bb588af36a46eb25e26350000000000000000d3d6d2c46dcf8debd00f6466f520afab8ea2fdf3ef1cca0c7f5333a8a5e1d6b0a73dd46a1fc300194845b847' },
+  { height: 971519,
+    hash: '0000000000000000b0e2883a2f9b67ee69fabede4bc9ee025b6af49bff5e5d0a',
+    header: '00802f28ef1bdb388f1c1051f8996fb5b8316ac441d42918b800f06500000000' +
+      '000000000b9cd8d341dfea6171fc15279b474d6876061e51b7f324ab1cebcc40d3c27a' +
+      '116335d46a52c2001912931d85' },
+  { height: 971520,
+    hash: '00000000000000002057dab2069b426562205b974723218b741a4ee28827fc54',
+    header: '0000f8310a5d5eff9bf46a5b02eec94bdebefa69ee679b2f3a88e2b000000000' +
+      '0000000043a8af6f56cdc1850dfb6a072ec9daf7ef5c52f87d466defcfa88b4665d760' +
+      'bcb237d46aedc2001929e8e23c' },
+  { height: 971521,
+    hash: '000000000000000081f58601f03132902c488ae440bfd032f85215936b852be2',
+    header: '00402c2754fc2788e24e1a748b212347975b206265429b06b2da572000000000' +
+      '00000000a9c96f439b3a6a8d1f7bbcdb33b14781e68559534006c8a0689938f4551af5' +
+      'c69c39d46aecc200191782f70f' },
+  { height: 971522,
+    hash: '000000000000000035265eb26ea436af88b59b40183141a73caf41a795a0f57d',
+    header: '00800236e22b856b931552f832d0bf40e48a482c903231f00186f58100000000' +
+      '00000000f39b52e4338a42060fcad58024d99a0477c5c0d75589d8d19ede7a6e798f5a' +
+      '61623dd46ad6c200193e8f85a4' },
+  { height: 971523,
+    hash: '0000000000000000ac805f618b511645b8be7c0338c73d454e6bc1bd3265480e',
+    header: '00e012207df5a095a741af3ca7413118409bb588af36a46eb25e263500000000' +
+      '00000000d3d6d2c46dcf8debd00f6466f520afab8ea2fdf3ef1cca0c7f5333a8a5e1d6' +
+      'b0a73dd46a1fc300194845b847' }
 ];
 
-const raw = (hex) => Buffer.from(hex, 'hex');
-const headerBlock = (header) => Block.fromRaw(Buffer.concat([header, Buffer.from([0])]));
+const raw = hex => Buffer.from(hex, 'hex');
+const headerBlock = header => Block.fromRaw(Buffer.concat([header,
+  Buffer.from([0])]));
 
 describe('Chain anchor', function() {
   this.timeout(20000);
@@ -90,7 +105,8 @@ describe('Chain anchor', function() {
       assert.strictEqual(chain.tip.rhash(), MAINNET[1].hash);
       const first = await chain.getEntryByHeight(MAINNET[0].height);
       assert.strictEqual(first.rhash(), MAINNET[0].hash);
-      assert.strictEqual(await chain.getEntryByHeight(MAINNET[0].height - 1), null);
+      assert.strictEqual(await chain.getEntryByHeight(MAINNET[0].height - 1),
+        null);
     });
 
     it('refuses headers that do not chain in the anchor itself', async () => {
@@ -101,7 +117,8 @@ describe('Chain anchor', function() {
       await assert.rejects(bad.open(), /do not chain/);
     });
 
-    it('accepts the real continuation, validating ASERT difficulty and work', async () => {
+    it('accepts the real continuation, validating ASERT difficulty and work',
+      async () => {
       for (let i = 2; i < MAINNET.length; i++) {
         const block = headerBlock(headers[i]);
         const entry = await chain.add(block, common.flags.VERIFY_POW);
@@ -116,7 +133,8 @@ describe('Chain anchor', function() {
       const locator = await chain.getLocator();
       assert(locator.length >= 2);
       assert.bufferEqual(locator[0], chain.tip.hash);
-      assert.bufferEqual(locator[locator.length - 1], headerBlock(headers[0]).hash());
+      assert.bufferEqual(locator[locator.length - 1],
+        headerBlock(headers[0]).hash());
     });
 
     it('does not extend the chain with an altered header', async () => {
@@ -132,9 +150,11 @@ describe('Chain anchor', function() {
 
     it('detects a database created from a different anchor', async () => {
       const original = chain.db.options.anchor;
-      chain.db.options.anchor = {height: MAINNET[0].height, headers: [headers[1], headers[2]]};
+      chain.db.options.anchor = {height: MAINNET[0].height,
+        headers: [headers[1], headers[2]]};
       try {
-        await assert.rejects(chain.db.verifyAnchor(), /not created from this anchor/);
+        await assert.rejects(chain.db.verifyAnchor(),
+          /not created from this anchor/);
       } finally {
         chain.db.options.anchor = original;
       }
@@ -156,7 +176,6 @@ describe('Chain anchor', function() {
       randomBytes(32).copy(header, 36);
       header.writeUInt32LE(time, 68);
       header.writeUInt32LE(bits, 72);
-      const target = consensus.fromCompact(bits);
       for (let nonce = 0; ; nonce++) {
         header.writeUInt32LE(nonce, 76);
         const block = headerBlock(header);
@@ -216,7 +235,8 @@ describe('Chain anchor', function() {
     it('rejects a header with the wrong difficulty', async () => {
       const time = chain.tip.time + 600;
       const block = mine(chain.tip.hash, time, 0x207ffffe);
-      await assert.rejects(chain.add(block, common.flags.VERIFY_POW), /bad-diffbits/);
+      await assert.rejects(chain.add(block, common.flags.VERIFY_POW),
+        /bad-diffbits/);
     });
 
     it('rejects a header without enough work', async () => {
@@ -227,7 +247,8 @@ describe('Chain anchor', function() {
       block.nonce ^= 1;
       block.refresh();
       if (!block.verifyPOW())
-        await assert.rejects(chain.add(block, common.flags.VERIFY_POW), /high-hash/);
+        await assert.rejects(chain.add(block, common.flags.VERIFY_POW),
+          /high-hash/);
     });
 
     it('counts as synced once its tip is recent, with work only from '
@@ -341,6 +362,42 @@ describe('Chain anchor', function() {
       }});
       try {
         assert.strictEqual(chain.tip.rhash(), trusted.hash);
+      } finally {
+        await chain.close();
+      }
+    });
+
+    it('reopens with no anchor given, from the database\'s own', async () => {
+      await (await open({...trusted, getHeaders: async () => headers})).close();
+
+      const chain = await open(undefined);
+      try {
+        // Where the database starts: what an anchor given again would be.
+        const height = TRUSTED - COUNT + 1;
+        assert.strictEqual(chain.options.anchor.height, height);
+        assert.strictEqual(chain.options.anchor.hash, rhash(headers[0]));
+        assert.strictEqual(chain.tip.rhash(), trusted.hash);
+
+        // Its locator stops there, as it does anchored.
+        const locator = await chain.getLocator();
+        const last = locator[locator.length - 1];
+        assert.strictEqual(Buffer.from(last).reverse().toString('hex'),
+          rhash(headers[0]));
+      } finally {
+        await chain.close();
+      }
+    });
+
+    it('reopens a database from genesis as before', async () => {
+      const fresh = new Chain({network, spv: true, memory: false, prefix});
+      await fresh.open();
+      await fresh.close();
+
+      const chain = new Chain({network, spv: true, memory: false, prefix});
+      await chain.open();
+      try {
+        assert.strictEqual(chain.options.anchor, null);
+        assert.strictEqual(chain.height, 0);
       } finally {
         await chain.close();
       }

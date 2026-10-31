@@ -129,6 +129,41 @@ describe('Protocol', function() {
     parser.feed(rawpacket);
   });
 
+  // A command may fill all 12 bytes of the header with no NUL, as in
+  // Bitcoin ABC (Avalanche's getavaproofs and avaproofsreq do).
+  it('should frame and parse a 12 character command', (cb) => {
+    const payload = Buffer.from([1, 2, 3]);
+
+    parser.once('packet', (packet) => {
+      try {
+        assert.strictEqual(packet.cmd, 'getavaproofs');
+        assert.bufferEqual(packet.data, payload);
+      } catch (e) {
+        cb(e);
+        return;
+      }
+      cb();
+    });
+
+    parser.feed(framer.packet('getavaproofs', payload));
+  });
+
+  it('should not frame a 13 character command', () => {
+    assert.throws(() => framer.packet('getavaproofsx', Buffer.alloc(0)));
+  });
+
+  it('should reject a command with data after its NUL', (cb) => {
+    const raw = framer.packet('ping', Buffer.alloc(8));
+    raw[4 + 'ping'.length + 1] = 0x61;
+
+    parser.once('error', (e) => {
+      assert.strictEqual(e.message, 'Non NULL-padded command.');
+      cb();
+    });
+
+    parser.feed(raw);
+  });
+
   it('should limit block like packet size to MAX_FORK_BLOCK_SIZE * 2', (cb) => {
     const packetsize = consensus.MAX_FORK_BLOCK_SIZE * 2 + 1;
     const raw = Buffer.alloc(packetsize);

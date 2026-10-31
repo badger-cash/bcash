@@ -5,15 +5,9 @@
 
 const assert = require('bsert');
 const EventEmitter = require('events');
-const reorg = require('./util/reorg');
-const Script = require('../lib/script/script');
-const Opcode = require('../lib/script/opcode');
-const Address = require('../lib/primitives/address');
-const Block = require('../lib/primitives/block');
 const Chain = require('../lib/blockchain/chain');
 const WorkerPool = require('../lib/workers/workerpool');
 const Miner = require('../lib/mining/miner');
-const MemWallet = require('./util/memwallet');
 const TXIndexer = require('../lib/indexer/txindexer');
 const AddrIndexer = require('../lib/indexer/addrindexer');
 const BlockStore = require('../lib/blockstore/level');
@@ -21,9 +15,7 @@ const FullNode = require('../lib/node/fullnode');
 const SPVNode = require('../lib/node/spvnode');
 const Network = require('../lib/protocol/network');
 const network = Network.get('regtest');
-const NodeClient = require('../lib/client/node');
-const WalletClient = require('../lib/client/wallet');
-const {forValue, testdir, rimraf} = require('./util/common');
+const {testdir, rimraf} = require('./util/common');
 
 const ports = {
   p2p: 49331,
@@ -46,7 +38,6 @@ const vectors = [
   }
 ];
 
-
 const workers = new WorkerPool({
   enabled: true,
   size: 2
@@ -68,12 +59,6 @@ const miner = new Miner({
   chain,
   version: 4,
   workers
-});
-
-const cpu = miner.cpu;
-
-const wallet = new MemWallet({
-  network
 });
 
 const txindexer = new TXIndexer({

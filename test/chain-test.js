@@ -16,7 +16,6 @@ const MemWallet = require('./util/memwallet');
 const Network = require('../lib/protocol/network');
 const Output = require('../lib/primitives/output');
 const common = require('../lib/blockchain/common');
-const util = require('../lib/utils/util');
 const nodejsUtil = require('util');
 const Opcode = require('../lib/script/opcode');
 const KeyRing = require('../lib/primitives/keyring');
@@ -34,7 +33,6 @@ const workers = new WorkerPool({
   enabled: true,
   size: 2
 });
-
 
 const blocks = new BlockStore({
   memory: true,
@@ -59,7 +57,6 @@ const cpu = miner.cpu;
 const wallet = new MemWallet({
   network
 });
-
 
 let tip1 = null;
 let tip2 = null;

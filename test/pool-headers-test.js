@@ -42,6 +42,8 @@ function fakePeer(height = 1e6) {
     height,
     bestHeight: -1,
     blockMap: new BufferMap(),
+    blockSizes: [],
+    sendsFullBlocks: false,
     txMap: new BufferMap(),
     compactBlocks: new BufferMap(),
     requested: [],
@@ -170,6 +172,38 @@ describe('Pool headers-first', function() {
     assert(total <= Pool.MAX_HEADER_WINDOW);
 
     assert.strictEqual(requestedBy(peers).size, total, 'no duplicates');
+  });
+
+  it('keeps an SPV peer that sends full blocks to one at a time', () => {
+    setHeaders(5000);
+    pool.options.spv = true;
+    const [full, filtering] = addPeers(2);
+    full.sendsFullBlocks = true;
+    full.blockSizes = [1 << 20];
+    filtering.blockSizes = [300];
+    // What waits to connect is filtered: small.
+    pool.blockSizes = [300];
+
+    pool.requestHeaderBlocks();
+
+    assert.strictEqual(full.requested.length, 1);
+    assert.strictEqual(filtering.requested.length, Pool.MAX_PEER_BLOCKS);
+  });
+
+  it('uses peers that send full blocks if none filter', () => {
+    setHeaders(5000);
+    pool.options.spv = true;
+    const peers = addPeers(2);
+    for (const peer of peers) {
+      peer.sendsFullBlocks = true;
+      peer.blockSizes = [1 << 20];
+    }
+    pool.blockSizes = [300];
+
+    pool.requestHeaderBlocks();
+
+    for (const peer of peers)
+      assert.strictEqual(peer.requested.length, Pool.MAX_PEER_BLOCKS);
   });
 
   it('leaves room for peers that connect after the first request', () => {

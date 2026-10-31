@@ -6,7 +6,7 @@ process.title = 'bcash';
 
 if (process.argv.indexOf('--help') !== -1
     || process.argv.indexOf('-h') !== -1) {
-  console.error('See the bcoin docs at: https://github.com/bcoin-org/bcoin/tree/master/docs.');
+  console.error('See the bcash docs at: https://github.com/badger-cash/bcash/tree/ecash/docs.');
   process.exit(1);
   throw new Error('Could not exit.');
 }
@@ -44,9 +44,13 @@ process.on('unhandledRejection', (err, promise) => {
   throw err;
 });
 
-process.on('SIGINT', async () => {
-  await node.close();
-});
+// systemd and kill stop with SIGTERM: close as on ^C, saving what the
+// node keeps across a restart.
+for (const signal of ['SIGINT', 'SIGTERM']) {
+  process.on(signal, async () => {
+    await node.close();
+  });
+}
 
 (async () => {
   await node.ensure();

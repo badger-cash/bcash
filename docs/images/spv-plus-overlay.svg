@@ -1,0 +1,83 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="760" height="400" viewBox="0 0 760 400" font-family="Helvetica, Arial, sans-serif" font-size="13">
+  <rect width="760" height="400" fill="#ffffff"/>
+  <title>The bcash overlay: PAGES-bit addresses cross every node; records cross only bcash links</title>
+
+  <!-- Ordinary links (addr gossip) -->
+  <g stroke="#b0b0b0" stroke-width="1.5" fill="none">
+    <line x1="120" y1="200" x2="250" y2="120"/>
+    <line x1="120" y1="200" x2="250" y2="280"/>
+    <line x1="250" y1="120" x2="380" y2="200"/>
+    <line x1="250" y1="280" x2="380" y2="200"/>
+    <line x1="380" y1="200" x2="510" y2="120"/>
+    <line x1="380" y1="200" x2="510" y2="280"/>
+    <line x1="510" y1="120" x2="640" y2="200"/>
+    <line x1="510" y1="280" x2="640" y2="200"/>
+    <line x1="250" y1="120" x2="510" y2="120"/>
+  </g>
+
+  <!-- Overlay links: the 2 outbound PAGES connections each bcash node keeps -->
+  <g stroke="#1f6feb" stroke-width="3" fill="none" stroke-dasharray="8 5">
+    <path d="M120 200 C 200 60, 560 60, 640 200"/>
+    <path d="M120 200 C 220 340, 440 340, 510 280"/>
+    <line x1="510" y1="280" x2="640" y2="200"/>
+  </g>
+
+  <!-- ABC nodes -->
+  <g fill="#e6e6e6" stroke="#8a8a8a" stroke-width="1.5">
+    <rect x="215" y="100" width="70" height="40" rx="6"/>
+    <rect x="215" y="260" width="70" height="40" rx="6"/>
+    <rect x="345" y="180" width="70" height="40" rx="6"/>
+    <rect x="475" y="100" width="70" height="40" rx="6"/>
+  </g>
+  <g text-anchor="middle" fill="#444">
+    <text x="250" y="125">ABC</text>
+    <text x="250" y="285">ABC</text>
+    <text x="380" y="205">ABC</text>
+    <text x="510" y="125">ABC</text>
+  </g>
+
+  <!-- bcash nodes -->
+  <g fill="#dbe9ff" stroke="#1f6feb" stroke-width="2">
+    <rect x="80" y="180" width="80" height="40" rx="6"/>
+    <rect x="470" y="260" width="80" height="40" rx="6"/>
+    <rect x="600" y="180" width="80" height="40" rx="6"/>
+  </g>
+  <g text-anchor="middle" fill="#0b3d91" font-weight="bold">
+    <text x="120" y="205">bcash</text>
+    <text x="510" y="285">bcash</text>
+    <text x="640" y="205">bcash</text>
+  </g>
+
+  <!-- Pages hanging off bcash nodes over WebTransport -->
+  <g stroke="#2a9d8f" stroke-width="1.5" fill="none">
+    <line x1="100" y1="220" x2="70" y2="300"/>
+    <line x1="140" y1="220" x2="150" y2="300"/>
+    <line x1="640" y1="220" x2="620" y2="300"/>
+    <line x1="640" y1="220" x2="700" y2="300"/>
+    <line x1="510" y1="300" x2="470" y2="350"/>
+  </g>
+  <g fill="#d7f3ee" stroke="#2a9d8f" stroke-width="1.5">
+    <circle cx="70" cy="315" r="15"/>
+    <circle cx="150" cy="315" r="15"/>
+    <circle cx="620" cy="315" r="15"/>
+    <circle cx="700" cy="315" r="15"/>
+    <circle cx="470" cy="365" r="15"/>
+  </g>
+  <g text-anchor="middle" fill="#1b6b61" font-size="11">
+    <text x="70" y="319">page</text>
+    <text x="150" y="319">page</text>
+    <text x="620" y="319">page</text>
+    <text x="700" y="319">page</text>
+    <text x="470" y="369">page</text>
+  </g>
+
+  <!-- Legend -->
+  <g font-size="12" fill="#333">
+    <line x1="30" y1="30" x2="70" y2="30" stroke="#b0b0b0" stroke-width="1.5"/>
+    <text x="78" y="34">P2P link: addr gossip carries the PAGES bit through every node</text>
+    <line x1="30" y1="52" x2="70" y2="52" stroke="#1f6feb" stroke-width="3" stroke-dasharray="8 5"/>
+    <text x="78" y="56">Overlay link: a bcash node's outbound connection to another bcash node; pages' records travel here</text>
+    <line x1="30" y1="74" x2="70" y2="74" stroke="#2a9d8f" stroke-width="1.5"/>
+    <text x="78" y="78">WebTransport: a page's connection to a full node</text>
+  </g>
+</svg>

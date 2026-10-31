@@ -22,11 +22,14 @@ async function freshPool(type, resolve) {
   const network = Network.get(type);
   const chain = new Chain({network, memory: true, spv: true});
   await chain.open();
-  const pool = new Pool({network, chain, spv: true, memory: true, listen: false});
+  const pool = new Pool({network, chain, spv: true, memory: true,
+    listen: false});
   pool.hosts.resolve = resolve;
   // Record refills instead of dialling anyone.
   pool.refills = 0;
-  pool.refill = () => { pool.refills++; };
+  pool.refill = () => {
+ pool.refills++;
+};
   await pool.hosts.open();
   return {chain, pool};
 }
@@ -72,7 +75,8 @@ describe('Pool seeds', function() {
         await chain.close();
       });
 
-      it('dials the DNS seed results before gossiped addresses, each once', async () => {
+      it('dials the DNS seed results before gossiped addresses, each once',
+        async () => {
         const network = Network.get(type);
         const answers = ['203.0.113.20', '203.0.113.21', '203.0.113.22'];
         const {chain, pool} = await freshPool(type, async () => answers);
@@ -92,9 +96,11 @@ describe('Pool seeds', function() {
           offered.push(addr.host);
         }
 
-        assert.deepStrictEqual([...new Set(offered)].sort(), [...answers].sort());
+        assert.deepStrictEqual([...new Set(offered)].sort(),
+          [...answers].sort());
         for (const host of offered)
-          assert(answers.includes(host), `gossip ${host} dialled before a seed result`);
+          assert(answers.includes(host),
+            `gossip ${host} dialled before a seed result`);
 
         // After the queue, the pool picks from the table as before.
         assert(pool.getHost());
@@ -102,7 +108,8 @@ describe('Pool seeds', function() {
       });
 
       it('skips a banned DNS seed result', async () => {
-        const {chain, pool} = await freshPool(type, async () => ['203.0.113.30', '203.0.113.31']);
+        const {chain, pool} = await freshPool(type,
+          async () => ['203.0.113.30', '203.0.113.31']);
         await pool.discoverSeeds();
         pool.hosts.ban('203.0.113.30');
 

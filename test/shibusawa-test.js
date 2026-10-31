@@ -9,9 +9,7 @@ const Script = require('../lib/script/script');
 const Stack = require('../lib/script/stack');
 const ScriptNum = require('../lib/script/scriptnum');
 
-const EMPTY = Buffer.alloc(0);
-
-let flags = [
+const flags = [
   common.flags.VERIFY_NONE,
   common.flags.STANDARD_VERIFY_FLAGS,
   common.flags.MANDATORY_VERIFY_FLAGS
@@ -56,8 +54,8 @@ describe('Shibusawa', function() {
     stack.push(Buffer.alloc(4, 1));
 
     isSuccess(
-      stack, 
-      Script.fromString('OP_ADD'), 
+      stack,
+      Script.fromString('OP_ADD'),
       Buffer.from('02020202', 'hex')
     );
   });
@@ -68,8 +66,8 @@ describe('Shibusawa', function() {
     stack.push(Buffer.alloc(4, 1));
 
     isSuccess(
-      stack, 
-      Script.fromString('OP_SUB'), 
+      stack,
+      Script.fromString('OP_SUB'),
       Buffer.from('02020202', 'hex')
     );
   });
@@ -88,9 +86,9 @@ describe('Shibusawa', function() {
     stack.push(Buffer.alloc(8, 1));
 
     isSuccess(
-      stack, 
-      Script.fromString('OP_ADD'), 
-      Buffer.from('0303030303030303', 'hex'), 
+      stack,
+      Script.fromString('OP_ADD'),
+      Buffer.from('0303030303030303', 'hex'),
       true
     );
   });
@@ -99,63 +97,68 @@ describe('Shibusawa', function() {
     const stack = new Stack();
     stack.push(Buffer.alloc(8, 2));
     stack.push(Buffer.alloc(8, 1));
-    
 
     isSuccess(
-      stack, 
-      Script.fromString('OP_SUB'), 
-      Buffer.from('0101010101010101', 'hex'), 
+      stack,
+      Script.fromString('OP_SUB'),
+      Buffer.from('0101010101010101', 'hex'),
       true
     );
   });
 
   it('should throw error if 64 bit integer addition overflows', async () => {
-    const max = ScriptNum.from('9223372036854775807')
-    const one = ScriptNum.from('1')
+    const max = ScriptNum.from('9223372036854775807');
+    const one = ScriptNum.from('1');
     const stack = new Stack();
     stack.push(max.toRaw());
     stack.push(one.toRaw());
 
-    isError(stack, Script.fromString('OP_ADD'), '64 bit ScriptNumber overflow.', true);
+    isError(stack, Script.fromString('OP_ADD'),
+      '64 bit ScriptNumber overflow.', true);
   });
 
-  it('should throw error if 64 bit integer addition overflows with negative number', async () => {
-    const min = ScriptNum.from('-9223372036854775807')
-    const negOne = ScriptNum.from('-1')
+  it('should throw error if 64 bit integer addition overflows with negative n' +
+    'umber', async () => {
+    const min = ScriptNum.from('-9223372036854775807');
+    const negOne = ScriptNum.from('-1');
     const stack = new Stack();
     stack.push(min.toRaw());
     stack.push(negOne.toRaw());
 
-    isError(stack, Script.fromString('OP_ADD'), '64 bit ScriptNumber overflow.', true);
+    isError(stack, Script.fromString('OP_ADD'),
+      '64 bit ScriptNumber overflow.', true);
   });
 
   it('should throw error if 64 bit integer subtraction overflows', async () => {
-    const min = ScriptNum.from('-9223372036854775807')
-    const one = ScriptNum.from('1')
+    const min = ScriptNum.from('-9223372036854775807');
+    const one = ScriptNum.from('1');
     const stack = new Stack();
     stack.push(min.toRaw());
     stack.push(one.toRaw());
 
-    isError(stack, Script.fromString('OP_SUB'), '64 bit ScriptNumber overflow.', true);
+    isError(stack, Script.fromString('OP_SUB'),
+      '64 bit ScriptNumber overflow.', true);
   });
 
-  it('should throw error if 64 bit integer subtraction overflows with negative number', async () => {
-    const max = ScriptNum.from('9223372036854775807')
-    const negOne = ScriptNum.from('-1')
+  it('should throw error if 64 bit integer subtraction overflows with negativ' +
+    'e number', async () => {
+    const max = ScriptNum.from('9223372036854775807');
+    const negOne = ScriptNum.from('-1');
     const stack = new Stack();
     stack.push(max.toRaw());
     stack.push(negOne.toRaw());
 
-    isError(stack, Script.fromString('OP_SUB'), '64 bit ScriptNumber overflow.', true);
+    isError(stack, Script.fromString('OP_SUB'),
+      '64 bit ScriptNumber overflow.', true);
   });
 
   it('should throw error if 0 + -9223372036854775808', async () => {
-    const zero = ScriptNum.from('0')
-    const min = ScriptNum.from('-9223372036854775808')
+    const zero = ScriptNum.from('0');
+    const min = ScriptNum.from('-9223372036854775808');
 
     let err;
     try {
-      zero.checkOverflow(min)
+      zero.checkOverflow(min);
     } catch (e) {
       err = e;
     }
@@ -163,7 +166,7 @@ describe('Shibusawa', function() {
     assert.strictEqual(err.message, 'Invalid INT64_MIN');
 
     try {
-      min.checkOverflow(zero)
+      min.checkOverflow(zero);
     } catch (e) {
       err = e;
     }

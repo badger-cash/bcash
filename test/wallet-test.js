@@ -19,7 +19,6 @@ const Outpoint = require('../lib/primitives/outpoint');
 const Script = require('../lib/script/script');
 const HD = require('../lib/hd');
 const Wallet = require('../lib/wallet/wallet');
-const {BufferMap} = require('buffer-map');
 const nodejsUtil = require('util');
 
 const KEY1 = 'xprv9s21ZrQH143K3Aj6xQBymM31Zb4BVc7wxqfUhMZrzewdDVCt'
@@ -505,7 +504,7 @@ describe('Wallet', function() {
     assert.strictEqual(conflict, 1);
     assert.strictEqual((await wallet.getBalance()).unconfirmed, 0);
   });
- 
+
   it('should handle double-spend (multiple inputs)', async () => {
     const wallet = await wdb.create();
     const address = await wallet.receiveAddress();
@@ -540,18 +539,18 @@ describe('Wallet', function() {
     const wallet = await wdb.create();
     const address = await wallet.receiveAddress();
     const hash = random.randomBytes(32);
-    const input0 = Input.fromOutpoint(new Outpoint(hash, 0)); 
+    const input0 = Input.fromOutpoint(new Outpoint(hash, 0));
     const input1 = Input.fromOutpoint(new Outpoint(hash, 1));
 
     const txa = new MTX();
     txa.addInput(input0);
     txa.addInput(input1);
-    txa.addOutput(address, 50000); 
+    txa.addOutput(address, 50000);
     await wdb.addTX(txa.toTX());
     assert.strictEqual((await wallet.getBalance()).unconfirmed, 50000);
-    
+
     let conflict = 0;
-    
+
     wallet.on('conflict', () => {
         conflict += 1;
      });
@@ -586,10 +585,10 @@ describe('Wallet', function() {
 
    let conflict = 0;
 
-   wallet.on('conflict', () => { 
-	   conflict += 1;
+   wallet.on('conflict', () => {
+     conflict += 1;
    });
-   
+
    const txb = new MTX();
    txb.addInput(input0);
    txb.addInput(input1);
@@ -598,18 +597,18 @@ describe('Wallet', function() {
    assert.strictEqual(wdb.height, 1);
 
    const removeConflict = wallet.txdb.removeConflict;
-   
+
    wallet.txdb.removeConflict = async () => {
-     throw new Error('Unexpected interrupt.');			     
+     throw new Error('Unexpected interrupt.');
    };
-  
+
    const entry = nextBlock(wdb);
-  
+
    await assert.rejects(async () => {
       await wdb.addBlock(entry, [txb.toTX()]);
    }, {
-	name: 'Error',
-	message: 'Unexpected interrupt.'
+  name: 'Error',
+  message: 'Unexpected interrupt.'
   });
 
    wallet.txdb.removeConflict = removeConflict;
@@ -1832,7 +1831,6 @@ describe('Wallet', function() {
         message: 'Some assertion.'
       });
      });
-
 
     it('should write tip without error in txs', async () => {
       const alice = await wdb.create();

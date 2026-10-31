@@ -1,0 +1,76 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="760" height="420" viewBox="0 0 760 420" font-family="Helvetica, Arial, sans-serif" font-size="13">
+  <rect width="760" height="420" fill="#ffffff"/>
+  <title>What a page fetches, keeps, and serves</title>
+  <defs>
+    <marker id="arr" markerWidth="10" markerHeight="10" refX="9" refY="5" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="#333"/>
+    </marker>
+  </defs>
+
+  <!-- Top: the chain as a page sees it -->
+  <text x="30" y="30" font-weight="bold">A page's chain, from its checkpoint to the tip</text>
+
+  <!-- checkpoint to best-288: headers + filtered blocks -->
+  <rect x="30" y="50" width="380" height="36" fill="#f0f0f0" stroke="#999"/>
+  <text x="220" y="73" text-anchor="middle" fill="#444">headers + filtered blocks (merkleblock), as any SPV client</text>
+
+  <!-- window: whole blocks -->
+  <rect x="410" y="50" width="300" height="36" fill="#dbe9ff" stroke="#1f6feb" stroke-width="2"/>
+  <text x="560" y="73" text-anchor="middle" fill="#0b3d91" font-weight="bold">the window: whole blocks, kept</text>
+
+  <!-- markers -->
+  <g fill="#333" font-size="11">
+    <line x1="30" y1="86" x2="30" y2="100" stroke="#333"/>
+    <text x="30" y="114">checkpoint</text>
+    <line x1="410" y1="86" x2="410" y2="100" stroke="#333"/>
+    <text x="410" y="114" text-anchor="middle">best height − 288</text>
+    <line x1="710" y1="86" x2="710" y2="100" stroke="#333"/>
+    <text x="710" y="114" text-anchor="end">tip</text>
+  </g>
+  <text x="560" y="134" text-anchor="middle" fill="#555" font-size="11">newest 288 blocks, at most 25 MB (about 8 MB on mainnet)</text>
+  <text x="560" y="150" text-anchor="middle" fill="#555" font-size="11">nothing is fetched twice</text>
+
+  <!-- Bottom: who serves whom -->
+  <text x="30" y="175" font-weight="bold">Where blocks come from</text>
+
+  <!-- Full node -->
+  <rect x="30" y="200" width="110" height="44" rx="8" fill="#dbe9ff" stroke="#1f6feb" stroke-width="2"/>
+  <text x="85" y="227" text-anchor="middle" fill="#0b3d91" font-weight="bold">full node</text>
+
+  <!-- Page A -->
+  <rect x="250" y="200" width="150" height="44" rx="8" fill="#d7f3ee" stroke="#2a9d8f" stroke-width="2"/>
+  <text x="325" y="220" text-anchor="middle" fill="#1b6b61" font-weight="bold">page A</text>
+  <text x="325" y="236" text-anchor="middle" fill="#1b6b61" font-size="11">window 1,737,700 – 1,737,987</text>
+
+  <!-- Page B -->
+  <rect x="510" y="200" width="150" height="44" rx="8" fill="#d7f3ee" stroke="#2a9d8f" stroke-width="2"/>
+  <text x="585" y="220" text-anchor="middle" fill="#1b6b61" font-weight="bold">page B</text>
+  <text x="585" y="236" text-anchor="middle" fill="#1b6b61" font-size="11">no full node reachable</text>
+
+  <!-- Page C -->
+  <rect x="510" y="300" width="150" height="44" rx="8" fill="#d7f3ee" stroke="#2a9d8f" stroke-width="2"/>
+  <text x="585" y="320" text-anchor="middle" fill="#1b6b61" font-weight="bold">page C</text>
+  <text x="585" y="336" text-anchor="middle" fill="#1b6b61" font-size="11">syncs from B, in turn</text>
+
+  <!-- Arrows -->
+  <line x1="140" y1="222" x2="250" y2="222" stroke="#333" stroke-width="1.5" marker-end="url(#arr)"/>
+  <text x="195" y="192" text-anchor="middle" font-size="11">blocks, whole</text>
+  <text x="195" y="258" text-anchor="middle" font-size="11">or filtered</text>
+
+  <line x1="400" y1="222" x2="510" y2="222" stroke="#333" stroke-width="1.5" marker-end="url(#arr)"/>
+  <text x="455" y="192" text-anchor="middle" font-size="11">blockrange, inv,</text>
+  <text x="455" y="258" text-anchor="middle" font-size="11">headers, blocks</text>
+
+  <line x1="585" y1="244" x2="585" y2="300" stroke="#333" stroke-width="1.5" marker-end="url(#arr)"/>
+  <text x="600" y="276" font-size="11">from B's window</text>
+
+  <!-- Note -->
+  <g font-size="11" fill="#555">
+    <text x="30" y="290">A page serves only its page peers, and only from its window.</text>
+    <text x="30" y="308">A page is a sync source (a loader) only once it has sent blockrange,</text>
+    <text x="30" y="326">and only when no full node is available.</text>
+    <text x="30" y="360">Blocks originate at full nodes: one page in a connected group must</text>
+    <text x="30" y="378">reach one, or none of them see new blocks. A page can catch up</text>
+    <text x="30" y="396">through pages only as far back as their windows reach.</text>
+  </g>
+</svg>

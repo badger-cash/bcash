@@ -1,16 +1,16 @@
 'use strict';
 
-const bcoin = require('../..');
+const bcash = require('../..');
 const random = require('bcrypto/lib/random');
 
 function dummy() {
   const hash = random.randomBytes(32);
-  return new bcoin.Outpoint(hash, 0);
+  return new bcash.Outpoint(hash, 0);
 }
 
-const walletdb = new bcoin.wallet.WalletDB({
+const walletdb = new bcash.wallet.WalletDB({
   network: 'testnet',
-  db: 'memory'
+  memory: true
 });
 
 (async () => {
@@ -28,7 +28,7 @@ const walletdb = new bcoin.wallet.WalletDB({
   console.log('Created account');
   console.log(acct);
 
-  const mtx = new bcoin.MTX();
+  const mtx = new bcash.MTX();
   mtx.addOutpoint(dummy());
   mtx.addOutput(acct.receiveAddress(), 50460);
 

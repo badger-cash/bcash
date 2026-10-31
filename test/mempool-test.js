@@ -9,7 +9,6 @@ const common = require('../lib/blockchain/common');
 const Block = require('../lib/primitives/block');
 const MempoolEntry = require('../lib/mempool/mempoolentry');
 const Mempool = require('../lib/mempool/mempool');
-const AddrIndexer = require('../lib/mempool/addrindexer');
 const WorkerPool = require('../lib/workers/workerpool');
 const Chain = require('../lib/blockchain/chain');
 const MTX = require('../lib/primitives/mtx');
@@ -99,7 +98,6 @@ async function getMockBlock(chain, txs = [], cb = true) {
 
   return block;
 }
-
 
 describe('Mempool', function() {
   this.timeout(5000);
