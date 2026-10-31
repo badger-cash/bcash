@@ -1,5 +1,5 @@
 # Avalanche
-### Applies to: bcash v2.7.0-avalanche.18
+### Applies to: bcash v3.0.0
 ### Date updated: October 31, 2026
 
 ## Authors

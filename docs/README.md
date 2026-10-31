@@ -1,5 +1,5 @@
 # bcash Documentation
-### Applies to: bcash v2.7.0-avalanche.18
+### Applies to: bcash v3.0.0
 ### Date updated: October 31, 2026
 
 ## Authors
@@ -42,6 +42,7 @@ The [CLI](CLI.md) document lists every RPC method this release registers.
 - [Configuration](Configuration.md): every option, and where it can be set.
 - [Wallet System](Wallet-System.md): wallets, accounts and key derivation.
 - [Notes on Design](Design.md): how the parts of a node fit together.
+- [Changelog](../CHANGELOG.md): what changed in each release.
 
 ## Running
 - [Command-Line Clients](CLI.md): `bcash-cli`, `bwallet-cli`, and the RPC

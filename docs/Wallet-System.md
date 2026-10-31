@@ -1,5 +1,5 @@
 # Notes on the Wallet System
-### Applies to: bcash v2.7.0-avalanche.18
+### Applies to: bcash v3.0.0
 ### Date updated: October 31, 2026
 
 ## Authors
@@ -51,8 +51,9 @@ network's `keyPrefix.coinType` (`lib/protocol/networks.js`):
 On mainnet, 1899 is the coin type Cashtab and bcash's own web wallet use, so
 a phrase from a new wallet shows the same addresses in them.
 
-Up to v2.7.0-avalanche.18, mainnet wallets used Bitcoin's 0 (`m/44'/0'`)
-and recorded no coin type. A wallet or account saved without one keeps 0, for
+Before v3.0.0, mainnet wallets used Bitcoin's 0 (`m/44'/0'`) and recorded
+no coin type: v2.6.1 and every earlier release, and the v2.7.0-avalanche
+pre-releases up to .18. A wallet or account saved without one keeps 0, for
 its addresses, the private keys that sign for them, and any accounts added
 to it later, so nothing already made changes. To use such a phrase in
 another eCash wallet, that wallet must derive along `m/44'/0'`.

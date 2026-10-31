@@ -1,4 +1,298 @@
-# Bcash Release Notes & Changelog
+# bcash Release Notes and Changelog
+### Applies to: bcash v3.0.0
+### Date updated: October 31, 2026
+
+## Authors
+The bcoin and bcash contributors
+
+# Table of Contents
+[SECTION I: ECASH EDITION](#section-i-ecash-edition)<BR>
+&nbsp;&nbsp;&nbsp;&nbsp;[v3.0.0](#v300)<BR>
+&nbsp;&nbsp;&nbsp;&nbsp;[v2.6.1](#v261)<BR>
+&nbsp;&nbsp;&nbsp;&nbsp;[v2.6.0](#v260)<BR>
+&nbsp;&nbsp;&nbsp;&nbsp;[v2.5.0](#v250)<BR>
+&nbsp;&nbsp;&nbsp;&nbsp;[v2.4.0](#v240)<BR>
+&nbsp;&nbsp;&nbsp;&nbsp;[v2.3.2](#v232)<BR>
+&nbsp;&nbsp;&nbsp;&nbsp;[v2.3.1](#v231)<BR>
+&nbsp;&nbsp;&nbsp;&nbsp;[v2.3.0](#v230)<BR>
+&nbsp;&nbsp;&nbsp;&nbsp;[v2.2.5](#v225)<BR>
+&nbsp;&nbsp;&nbsp;&nbsp;[v2.2.4](#v224)<BR>
+&nbsp;&nbsp;&nbsp;&nbsp;[v2.2.3](#v223)<BR>
+&nbsp;&nbsp;&nbsp;&nbsp;[v2.2.2](#v222)<BR>
+&nbsp;&nbsp;&nbsp;&nbsp;[v2.2.1](#v221)<BR>
+&nbsp;&nbsp;&nbsp;&nbsp;[v2.2.0](#v220)<BR>
+&nbsp;&nbsp;&nbsp;&nbsp;[v2.1.3](#v213)<BR>
+&nbsp;&nbsp;&nbsp;&nbsp;[v2.1.2](#v212)<BR>
+[SECTION II: BCASH BEFORE ECASH](#section-ii-bcash-before-ecash)<BR>
+&nbsp;&nbsp;&nbsp;&nbsp;[v2.1.3 (Bitcoin Cash)](#v213-bitcoin-cash)<BR>
+&nbsp;&nbsp;&nbsp;&nbsp;[v2.1.2 (Bitcoin Cash)](#v212-bitcoin-cash)<BR>
+&nbsp;&nbsp;&nbsp;&nbsp;[v2.1.1](#v211)<BR>
+&nbsp;&nbsp;&nbsp;&nbsp;[v1.1.1 (2021 update)](#v111-2021-update)<BR>
+&nbsp;&nbsp;&nbsp;&nbsp;[v1.2.0](#v120)<BR>
+&nbsp;&nbsp;&nbsp;&nbsp;[v1.1.0](#v110)<BR>
+&nbsp;&nbsp;&nbsp;&nbsp;[v1.0.2](#v102)<BR>
+[SECTION III: BCOIN](#section-iii-bcoin)<BR>
+[Copyright](#copyright)
+
+# SECTION I: ECASH EDITION
+
+Releases on the `ecash` branch, tagged `vX.Y.Z-ecash`, sync with the eCash
+(XEC) network. Each release's full notes, with its test results, are on the
+[releases page](https://github.com/badger-cash/bcash/releases).
+
+## v3.0.0
+
+The Avalanche line becomes the eCash release. It brings in every change of
+the v2.7.0-avalanche pre-releases, .1 to .19, which were cut from the
+`feat/avalanche` branch.
+
+### Upgrading from v2.6.1
+
+- **Testnet and regtest addresses changed.** Testnet addresses are `ectest:`
+  and regtest addresses `ecregtest:`, as in Bitcoin ABC. The old `xectest:`
+  and `xecreg:` prefixes are refused. Regtest WIFs use version `0xef`, with
+  `tpub`/`tprv` keys. Mainnet addresses and keys are unchanged.
+- **New mainnet wallets use coin type 1899** (`m/44'/1899'`), as Cashtab
+  does. Existing wallets keep 0, with no migration. v2.6.1 can still open a
+  v3.0.0 wallet database, but it can't sign for a 1899 wallet.
+- **Full nodes advertise service bit 27 (`PAGES`)** and keep 2 of their
+  outbound connections to other nodes advertising it.
+- **Commands that never worked are gone:** `bcash-cli filter` and `reset`,
+  and `bwallet-cli nested` and `info`, with their client methods.
+- **With `--index-tx`, the transaction index fills in its spenders** once,
+  in the background, on the first start.
+- Avalanche, WebTransport and STUN stay off until you turn them on, with
+  `--avalanche`, `--wt-port` and `--stun-port`.
+
+### Avalanche
+
+With `--avalanche`, bcash runs Avalanche as Bitcoin ABC v0.34.2 does. See
+[Avalanche.md](docs/Avalanche.md).
+
+- Blocks are finalized by polls of eCash's stakers. What Avalanche rejects is
+  parked, and a parked block is polled again so stakers can unpark it.
+- The block policies are enforced: the miner fund, the staking reward winner,
+  real time targeting and pre-consensus conflicts. `getblocktemplate` pays
+  the staking reward winner, and is rebuilt when a transaction is finalized.
+- Pre-consensus finalizes mempool transactions before they are mined.
+- Full nodes answer polls, and can stake their own proof with `--ava-proof`,
+  `--ava-master-key`, `--ava-delegation` and `--ava-session-key`.
+- Bitcoin ABC's proof, delegation and Avalanche RPCs are available.
+  Avalanche peers are saved to `avapeers.dat` in ABC's format.
+- SPV clients check stakers' proofs by merkleblock and poll blocks and their
+  own transactions. On mainnet, a broadcast transaction was final in 7.6 to
+  10.4 seconds. `bcash --spv --avalanche` passes the pre-consensus and
+  staking-reward options, and watches what it broadcasts.
+- The P2P protocol version is 70017, so ABC nodes poll bcash for up to 1024
+  items at a time.
+
+### Pages: SPV in the browser
+
+See [Running-in-the-browser.md](docs/Running-in-the-browser.md) and the
+[SPV+ specification](docs/SPV-Plus.md).
+
+- **WebTransport.** `--wt-port` serves P2P over WebTransport beside TCP, with
+  a self-signed certificate that pages pin by hash. `--wt-seed-port` serves a
+  seed with a browser-trusted certificate. `wtaddr` gossips WebTransport
+  nodes, and pages get their own inbound slots (`--wt-max-inbound`).
+- **WebRTC between pages.** `--stun-port` runs a STUN server. Full nodes
+  introduce pages to each other across nodes. Pages keep a window of their
+  newest whole blocks, serve it to each other, relay unconfirmed
+  transactions and introduce each other. Mainnet and testnet list built-in
+  fallback STUN servers.
+- **Anchored chains.** A page's chain starts at the newest built-in
+  checkpoint. `pool.fetchHeaders` and `pool.scanRange({entries})` reach the
+  history below it, and `History` takes trusted blocks below the anchor.
+- **Browser builds.** `yarn build-browser` writes the web wallet and the SPV
+  bundle. `browser/spv.js` exports what a page's own transactions use,
+  BIP70 included.
+- **Web wallet.** Static files with no backend, live at
+  https://webnode.badger.cash: XEC and SLP Types 1 and 2, coins proven by
+  SPV, sends that can't be lost, and send status across peers.
+
+### Network
+
+- Outbound peers left on a chain with less work are dropped after 20
+  minutes, as in Bitcoin ABC.
+- A `getheaders` from another chain closes the peer at once. eCash shares
+  Bitcoin Cash's network magic, so mainnet nodes meet these peers too.
+- A `mempool` request is answered only with what matches the peer's filter,
+  as BIP 37 says. SPV clients ask for their peers' mempools once synced and
+  on every connection (`request-mempool`), and no longer drop a peer that
+  answers with nothing.
+- A page dropped by its node retries every 10 seconds. Jobs such as `scanRange` also try up
+  to 32 hosts from the address book, and filtered scans skip peers that
+  can't serve them, including Bitcoin ABC 0.32.4 to 0.33.10.
+- An SPV client keeps the biggest stakers when it trims its Avalanche
+  connections, and dials less when dials stop adding stake.
+- SIGTERM closes the node cleanly, as SIGINT does.
+
+### Indexing and HTTP
+
+- The transaction indexer records where each output was spent.
+  `GET /tx/:hash` gives each output a `spentBy`, and `GET /spent/:hash/:index`
+  returns one output's spender.
+- `GET /header/:block` returns a header by hash or height, on full and SPV
+  nodes, so `bcash-cli header` works.
+- `bwallet-cli view` decodes the transaction locally.
+
+### Fixes
+
+- A mempool holding an SLP transaction broke `getblocktemplate` when SLP
+  indexing was on. This dated from 2021.
+- `getblocktemplate` failed when a child came before its parent, which
+  eCash's transaction order allows.
+- The wallet module failed to load outside a full node, so `WalletNode` and
+  `bin/wallet` threw at start.
+- Full nodes ignored the `services` option.
+
+### Other changes
+
+- `bcash.bip70` provides the payment protocol, wire-identical to
+  `@hansekontor/checkout-components`.
+- Cashaddr decodes with bstring, and `ecashaddrjs` is gone.
+- `yarn lint` passes with no errors, and now fails on any.
+- Every doc is rewritten in one layout and checked against the code, and the
+  SPV+ specification is new. The sample configs list only options the code
+  reads.
+- The default coinbase text is "mined by bcash". The old CircleCI config is
+  removed.
+
+## v2.6.1
+
+- bsip is replaced by bcrypto's siphash, so every native module builds during
+  `yarn install` without a `python` command.
+
+## v2.6.0
+
+An upgrade advised for every node: it fixes two ways a bcash node could part
+from the eCash chain.
+
+- Schnorr `CHECKMULTISIG` checks every signature. It checked only the first.
+- SigChecks limits as in Bitcoin ABC: per block at every height, and per
+  transaction (3000) once Phonon is on. Sigops limits apply only before
+  Phonon. Legacy multisig counts its SigChecks.
+- Forks from below the last checkpoint are refused again.
+- Regtest activates Phonon at height 0.
+- Mempool and mining follow ABC's policy: the per-input SigChecks density
+  rule, fees by virtual size, and blocks packed against the SigChecks limit.
+  The mempool cache version is now 3.
+- The wallet signs multisig inputs with ECDSA, so multisig wallets can spend.
+- Builds on Node.js 18, 20 and 24. `yarn.lock` is the lockfile.
+
+## v2.5.0
+
+- `Pool#scanRange` fetches whole blocks with `full: true`, each checked
+  against its header's merkle root.
+- `Pool#syncHeaders` brings an SPV chain's headers to a peer's tip with
+  `getheaders` alone.
+- SPV pools size their block limit by height, so blocks over 2 MB parse.
+- `MemBlock#createMerkleRoot` computes a merkle root without parsing the
+  transactions.
+- The miner fund consensus rule is dropped, as ABC did at Wellington.
+
+## v2.4.0
+
+- An SPV chain can start from a trusted block hash, and an anchored chain
+  counts as synced once its tip is recent.
+- `Pool#scanRange` scans a range of heights for what a bloom filter matches,
+  across several peers.
+- Warm starts redial the peers that last answered.
+- Header-chain blocks are downloaded from every outbound peer. Fixes for
+  checkpointed sync: the in-flight limit and canonical transaction order.
+- Consensus as in ABC: the coinbase rule on mainnet only, and 63-bit script
+  integers at every height.
+- SLP fields that are not data pushes are not SLP.
+- Mining fixes: getwork, template bits on min-difficulty networks, and
+  every worker mining.
+
+## v2.3.2
+
+- DNS seed results are dialed before addresses from the table. Fresh SPV
+  starts reached their first block in 1.4 to 7.1 seconds.
+
+## v2.3.1
+
+- SPV peers that send full blocks are dropped.
+- Peers are found as in Bitcoin ABC, from ABC's DNS seeds and fixed seeds.
+
+## v2.3.0
+
+- `OP_REVERSEBYTES` no longer mutates shared stack buffers.
+- The SPV chain anchor: `anchor: {height, headers}`.
+- The ASERT clamp is fixed.
+- Testnet follows Bitcoin ABC.
+- The Obolensky (May 15, 2026) upgrade.
+
+## v2.2.5
+
+- Shibusawa checkpoints, the 63-bit standard verify flag, and a `NUM2BIN`
+  fix.
+- Usage note: with many non-eCash nodes on the network, set inbound peers to
+  4.
+
+## v2.2.4
+
+- The November 15, 2025 (Shibusawa) upgrade: 63-bit script integers.
+
+## v2.2.3
+
+- Node.js version compatibility.
+- Fixed: SLP Type 2 GENESIS and MINT in the same block, and unindexing SLP
+  blocks.
+
+## v2.2.2
+
+- SLP Token Type 2.
+- Token records carry a `version` (token type) property.
+
+## v2.2.1
+
+- The May 15, 2023 (Wellington) upgrade. The coinbase rule leaves consensus
+  once Wellington activates.
+
+## v2.2.0
+
+- eCash message signing and verification.
+- ecashaddr decoding.
+- SLP BURN records, and SLP information on input coins.
+- SLP validation fixes, and a fix for transactions by address with a limit.
+- A new valid coinbase rule address.
+
+## v2.1.3
+
+- The first eCash release of v2.1.3: compact blocks parse the mempool
+  correctly, and an Output construction bug is fixed.
+
+## v2.1.2
+
+- The first eCash Edition release: it syncs with the eCash (XEC) network,
+  with eCash's seeders.
+
+# SECTION II: BCASH BEFORE ECASH
+
+Releases for the Bitcoin Cash network, from before bcash followed eCash.
+
+## v2.1.3 (Bitcoin Cash)
+
+- Fixed a mempool parse bug in compact blocks that made the node lose sync.
+
+## v2.1.2 (Bitcoin Cash)
+
+- The Axion checkpoint (May 15, 2021).
+
+## v2.1.1
+
+Support for Simple Ledger Protocol (SLP) tokens:
+
+- Token Type 1 only.
+- Indexing by transaction, coin and address.
+- SLP endpoints in the HTTP API, and SLP in existing endpoints.
+- SLP in `bcash-cli`.
+
+## v1.1.1 (2021 update)
+
+- Syncs until May 15, 2021.
 
 ## v1.2.0
 
@@ -37,7 +331,9 @@ Major changes include backports from bcoin:
 
 - Initial tagged bcash release.
 
-# Bcoin Release Notes & Changelog
+# SECTION III: BCOIN
+
+bcash is a fork of bcoin. These are bcoin's release notes up to the fork.
 
 ## v1.x
 
@@ -502,3 +798,7 @@ Becomes this:
 ### Notable Changes
 
 - Initial tagged release.
+
+# Copyright
+
+This document is published under the terms of the MIT license.

@@ -1,5 +1,5 @@
 # Beginner's Guide
-### Applies to: bcash v2.7.0-avalanche.18
+### Applies to: bcash v3.0.0
 ### Date updated: October 31, 2026
 
 ## Authors
@@ -96,7 +96,7 @@ an old release of bcoin-org's bcash, not this one.)
 ``` bash
 $ git clone https://github.com/badger-cash/bcash.git
 $ cd bcash
-$ git checkout v2.7.0-avalanche.18
+$ git checkout v3.0.0-ecash
 $ yarn install
 ```
 
