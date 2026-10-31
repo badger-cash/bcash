@@ -172,8 +172,8 @@ On any other host, choose one of two ways to serve:
 - With `--api-key`, every request must carry the key.
 - With `--no-auth`, anyone can use the node's HTTP API without a key.
 
-On another host, if you set neither, bcash makes up a random key and does not show it anywhere,
-so every request is refused.
+If you set neither, bcash makes up a random key and does not show it
+anywhere, so every request is refused.
 
 A fully public node can also stay on `127.0.0.1`, where no key is needed, with
 a reverse proxy such as nginx serving it to the internet. That is how
